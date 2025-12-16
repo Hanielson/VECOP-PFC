@@ -23,15 +23,10 @@ entity neorv32_valu is
         op0     : in std_ulogic_vector(VLEN-1 downto 0);
         -- ALU Operation ID --
         alu_op  : in std_ulogic_vector(7 downto 0);
-        -- Vector Multiplier --
-        vlmul   : in std_ulogic_vector(2 downto 0);
         -- Vector Mask --
         vmask   : in std_ulogic_vector(VLEN-1 downto 0);
         -- Vector Selected Element Width --
         vsew    : in std_ulogic_vector(2 downto 0);
-        -- Narrow/Widen Operation Indication --
-        narrow  : in std_ulogic;
-        widen   : in std_ulogic;
 
         -- ALU Result --
         alu_out : out std_ulogic_vector(VLEN-1 downto 0)
@@ -69,6 +64,67 @@ architecture neorv32_valu_rtl of neorv32_valu is
     -- SHIFT Signals --
     signal shift_out : std_ulogic_vector(VLEN-1 downto 0);
 
+    -- COMPARISON Signals --
+    signal comp_out : std_ulogic_vector(VLEN-1 downto 0);
+
+    ---------------------------
+    --- AUXILIARY FUNCTIONS ---
+    ---------------------------
+    
+    -- SHIFT OPERATIONS FUNCTION --
+    function shift_map(sew  : integer; 
+                       op   : std_ulogic_vector; 
+                       op_a : std_ulogic_vector; 
+                       op_b : std_ulogic_vector) return std_ulogic_vector is
+        variable result : std_ulogic_vector(VLEN-1 downto 0);
+    begin
+        -- Byte/Byte2/Byte4 indexation, based on SEW (8, 16, 32 bits) --
+        for ii in 0 to ((VLEN / sew) - 1) loop
+            case op is
+                -- TODO: CHANGE THIS LOGIC => IT WILL CREATE A LARGE SHIFTER DURING SYNTHESIS --
+                when valu_sll => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_left(unsigned(op_a(sew*ii+(sew-1) downto sew*ii)),  to_integer(unsigned(op_b(sew*ii+(sew-1) downto sew*ii)))));
+                when valu_srl => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_right(unsigned(op_a(sew*ii+(sew-1) downto sew*ii)), to_integer(unsigned(op_b(sew*ii+(sew-1) downto sew*ii)))));
+                when valu_sra => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_right(signed(op_a(sew*ii+(sew-1) downto sew*ii)),   to_integer(unsigned(op_b(sew*ii+(sew-1) downto sew*ii)))));
+                when others   => result(sew*ii+(sew-1) downto sew*ii) := (others => '0');
+            end case;
+        end loop;
+        return result;
+    end function shift_map;
+
+    -- COMPARISON OPERATION FUNCTION --
+    function compare_map(idx  : integer;
+                         sew  : integer;
+                         op   : std_ulogic_vector;
+                         op_a : std_ulogic_vector;
+                         op_b : std_ulogic_vector) return std_ulogic is
+        variable comp   : std_ulogic := '0';
+        variable result : std_ulogic := '0';
+        variable a      : std_ulogic_vector(sew-1 downto 0) := (others => '0');
+        variable b      : std_ulogic_vector(sew-1 downto 0) := (others => '0');
+    begin
+        if (idx < (VLEN / sew)) then
+            a := op_a(sew*idx+(sew-1) downto sew*idx);
+            b := op_b(sew*idx+(sew-1) downto sew*idx);
+            case op is
+                when valu_seq  => comp := '1' when (a = b)                      else '0';
+                when valu_sne  => comp := '1' when (not (a = b))                else '0';
+                when valu_sltu => comp := '1' when (unsigned(a) < unsigned(b))  else '0';
+                when valu_slt  => comp := '1' when (signed(a) < signed(b))      else '0';
+                when valu_sleu => comp := '1' when (unsigned(a) <= unsigned(b)) else '0';
+                when valu_sle  => comp := '1' when (signed(a) <= signed(b))     else '0';
+                when valu_sgtu => comp := '1' when (unsigned(a) > unsigned(b))  else '0';
+                when valu_sgt  => comp := '1' when (signed(a) > signed(b))      else '0';
+                when valu_sgeu => comp := '1' when (unsigned(a) >= unsigned(b)) else '0';
+                when valu_sge  => comp := '1' when (signed(a) >= signed(b))     else '0';
+                when others    => comp := '0';
+            end case;
+            result := comp;
+        else 
+            result := '0';
+        end if;
+        return result;
+    end function compare_map;
+
 begin
 
     -----------------------
@@ -92,9 +148,29 @@ begin
     --------------------------------------
     process(all) begin
         case alu_op is
-            -- ADD/SUB --
-            when valu_add | valu_sub =>
+            -- ADD/SUB + SINGLE-WIDTH WIDENING ADD/SUB + ADD/SUB W/ CARRY/BORROW IN --
+            when valu_add | valu_sub | valu_adc | valu_madc | valu_sbc | valu_msbc =>
                 vsew_i  <= vsew;
+                op2_i   <= op2;
+                op1_i   <= op1;
+                op0_i   <= op0;
+                alu_out <= add_final;
+            -- SINGLE-WIDTH WIDENING OPERATIONS --
+            when valu_waddu | valu_wsubu | valu_wadd | valu_wsub =>
+                vsew_i  <= "001" when (vsew = "000") else
+                           "010" when (vsew = "001") else
+                           (others => '0');
+                op2_i   <= op2;
+                op1_i   <= op1;
+                op0_i   <= op0;
+                alu_out <= ext16 when (vsew = "000") else
+                           ext32 when (vsew = "001") else
+                           (others => '0');
+            -- DOUBLE-WIDTH WIDENING OPERATIONS --
+            when valu_waddu_2sew | valu_wsubu_2sew | valu_wadd_2sew | valu_wsub_2sew =>
+                vsew_i  <= "001" when (vsew = "000") else
+                           "010" when (vsew = "001") else
+                           (others => '0');
                 op2_i   <= op2;
                 op1_i   <= op1;
                 op0_i   <= op0;
@@ -106,6 +182,15 @@ begin
                 op1_i   <= op2;
                 op0_i   <= op0;
                 alu_out <= add_final;
+            -- INTEGER EXTEND OPERATIONS --
+            when valu_zext_vf2 | valu_sext_vf2 | valu_zext_vf4 | valu_sext_vf4 | valu_zext_vf8 | valu_sext_vf8 =>
+                vsew_i  <= vsew;
+                op2_i   <= op2;
+                op1_i   <= op1;
+                op0_i   <= op0;
+                alu_out <= ext16 when (vsew = "000") else
+                           ext32 when (vsew = "001") else
+                           (others => '0');
             -- BITWISE LOGICAL --
             when valu_and | valu_or | valu_xor =>
                 vsew_i  <= vsew;
@@ -113,6 +198,20 @@ begin
                 op1_i   <= op1;
                 op0_i   <= op0;
                 alu_out <= logic_final;
+            -- SHIFT OPERATIONS --
+            when valu_sll | valu_srl | valu_sra =>
+                vsew_i  <= vsew;
+                op2_i   <= op2;
+                op1_i   <= op1;
+                op0_i   <= op0;
+                alu_out <= shift_out;
+            -- COMPARISON OPERATIONS --
+            when valu_seq | valu_sne  | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
+                vsew_i  <= vsew;
+                op2_i   <= op2;
+                op1_i   <= op1;
+                op0_i   <= op0;
+                alu_out <= comp_out;
             -- UNSUPPORTED INSTRUCTION --
             when others =>
                 vsew_i  <= (others => '0');
@@ -207,7 +306,7 @@ begin
                        add_final when (alu_op = valu_waddu) or (alu_op = valu_wsubu) or (alu_op = valu_wadd) or (alu_op = valu_wsub) else
                        op2_i;
             offset_8b_1 := 8*ii;
-            offset_8b_2 := 8*ii+(VLEN/16);
+            offset_8b_2 := 8*(ii+(VLEN/16));
 
             -- INT-EXT: SEW/2 to SEW --
             if (alu_op = valu_zext_vf2) or (alu_op = valu_waddu_2sew) or (alu_op = valu_wsubu_2sew) then
@@ -296,22 +395,6 @@ begin
     -------------------------------------
     -- DATAPATH for SHIFT instructions --
     -------------------------------------
-    function shift_map(sew : integer, alu_op : std_ulogic_vector, op_a : std_ulogic_vector, op_b : std_ulogic_vector) return std_ulogic_vector(VLEN-1 downto 0) is
-        variable result : std_ulogic_vector(VLEN-1 downto 0);
-    begin
-        -- Byte/Byte2/Byte4 indexation, based on SEW (8, 16, 32 bits) --
-        for ii in 0 to ((VLEN / sew) - 1) loop
-            case alu_op is
-                when valu_sll => result(sew*ii+(sew-1) downto sew*ii) <= op_a(sew*ii+(sew-1) downto sew*ii) sll unsigned(op_b(sew*ii+(sew-1) downto sew*ii));
-                when valu_srl => result(sew*ii+(sew-1) downto sew*ii) <= op_a(sew*ii+(sew-1) downto sew*ii) srl unsigned(op_b(sew*ii+(sew-1) downto sew*ii));
-                when valu_sra => result(sew*ii+(sew-1) downto sew*ii) <= op_a(sew*ii+(sew-1) downto sew*ii) sra unsigned(op_b(sew*ii+(sew-1) downto sew*ii));
-                when others   => result(sew*ii+(sew-1) downto sew*ii) <= (others => '0');
-            end case;
-        end loop;
-
-        return result;
-    end function shift_map;
-
     process(all) begin
         case vsew_i is
             when "000"  => shift_out <= shift_map(8,  alu_op, op2_i, op1_i);
@@ -324,44 +407,15 @@ begin
     --------------------------------------------------------------
     -- DATAPATH for SEW = [8, 16, 32] bits COMPARE instructions --
     --------------------------------------------------------------
-    function compare_map(idx : integer, sew : integer, alu_op : std_ulogic_vector, op_a : std_ulogic_vector, op_b : std_ulogic_vector) return std_ulogic is
-        variable comp   : std_ulogic := '0';
-        variable result : std_ulogic := '0';
-        variable a      : std_ulogic_vector(sew-1 downto 0) := (others => "0");
-        variable b      : std_ulogic_vector(sew-1 downto 0) := (others => "0");
-    begin
-
-        if (idx < (VLEN / sew)) then
-            a := op_a(sew*idx+(sew-1) downto sew*idx);
-            b := op_b(sew*idx+(sew-1) downto sew*idx);
-            case alu_op is
-                when valu_seq  => comp := '1' when (a = b) else '0';
-                when valu_sne  => comp := '1' when (not (a = b)) else '0';
-                when valu_sltu => comp := (unsigned(a) < unsigned(b));
-                when valu_slt  => comp := (signed(a) < signed(b));
-                when valu_sleu => comp := (unsigned(a) <= unsigned(b));
-                when valu_sle  => comp := (signed(a) <= signed(b));
-                when valu_sgtu => comp := (unsigned(a) > unsigned(b));
-                when valu_sgt  => comp := (signed(a) > signed(b));
-                when valu_sgeu => comp := (unsigned(a) >= unsigned(b));
-                when valu_sge  => comp := (signed(a) >= signed(b));
-                when others    => comp := '0';
-            end case;
-            result := comp;
-        else 
-            result := '0';
-        end if;
-
-        return result;
-    end function compare_map;
-
     COMP_DATAPATH: for idx in 0 to (VLEN - 1) generate
-        case vsew_i is
-            when "000"  => comp_out(idx) <= compare_map(idx, 8,  alu_op, op2_i, op1_i);
-            when "001"  => comp_out(idx) <= compare_map(idx, 16, alu_op, op2_i, op1_i);
-            when "010"  => comp_out(idx) <= compare_map(idx, 32, alu_op, op2_i, op1_i);
-            when others => comp_out(idx) <= '0';
-        end case;
+        process(all) begin
+            case vsew_i is
+                when "000"  => comp_out(idx) <= compare_map(idx, 8,  alu_op, op2_i, op1_i);
+                when "001"  => comp_out(idx) <= compare_map(idx, 16, alu_op, op2_i, op1_i);
+                when "010"  => comp_out(idx) <= compare_map(idx, 32, alu_op, op2_i, op1_i);
+                when others => comp_out(idx) <= '0';
+            end case;
+        end process;
     end generate COMP_DATAPATH;
 
 end neorv32_valu_rtl;
