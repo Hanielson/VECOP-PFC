@@ -1,6 +1,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use ieee.math_real.all;
 
 use work.neorv32_vpackage.all;
 
@@ -76,15 +77,19 @@ architecture neorv32_valu_rtl of neorv32_valu is
                        op   : std_ulogic_vector; 
                        op_a : std_ulogic_vector; 
                        op_b : std_ulogic_vector) return std_ulogic_vector is
-        variable result : std_ulogic_vector(VLEN-1 downto 0);
+        variable result     : std_ulogic_vector(VLEN-1 downto 0);
+        variable shift_bits : integer;
     begin
+        -- Defines how many bits from the element will be used to define the shift amount --
+        shift_bits := integer(ceil(log2(real(sew)))) - 1;
+
         -- Byte/Byte2/Byte4 indexation, based on SEW (8, 16, 32 bits) --
         for ii in 0 to ((VLEN / sew) - 1) loop
             case op is
                 -- TODO: CHANGE THIS LOGIC => IT WILL CREATE A LARGE SHIFTER DURING SYNTHESIS --
-                when valu_sll => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_left(unsigned(op_a(sew*ii+(sew-1) downto sew*ii)),  to_integer(unsigned(op_b(sew*ii+(sew-1) downto sew*ii)))));
-                when valu_srl => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_right(unsigned(op_a(sew*ii+(sew-1) downto sew*ii)), to_integer(unsigned(op_b(sew*ii+(sew-1) downto sew*ii)))));
-                when valu_sra => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_right(signed(op_a(sew*ii+(sew-1) downto sew*ii)),   to_integer(unsigned(op_b(sew*ii+(sew-1) downto sew*ii)))));
+                when valu_sll => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_left(unsigned(op_a(sew*ii+(sew-1) downto sew*ii)),  to_integer(unsigned(op_b(sew*ii+shift_bits downto sew*ii)))));
+                when valu_srl => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_right(unsigned(op_a(sew*ii+(sew-1) downto sew*ii)), to_integer(unsigned(op_b(sew*ii+shift_bits downto sew*ii)))));
+                when valu_sra => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_right(signed(op_a(sew*ii+(sew-1) downto sew*ii)),   to_integer(unsigned(op_b(sew*ii+shift_bits downto sew*ii)))));
                 when others   => result(sew*ii+(sew-1) downto sew*ii) := (others => '0');
             end case;
         end loop;
@@ -183,7 +188,7 @@ begin
                 op0_i   <= op0;
                 alu_out <= add_final;
             -- INTEGER EXTEND OPERATIONS --
-            when valu_zext_vf2 | valu_sext_vf2 | valu_zext_vf4 | valu_sext_vf4 | valu_zext_vf8 | valu_sext_vf8 =>
+            when valu_zext_vf2 | valu_sext_vf2 | valu_zext_vf4 | valu_sext_vf4 =>
                 vsew_i  <= vsew;
                 op2_i   <= op2;
                 op1_i   <= op1;
