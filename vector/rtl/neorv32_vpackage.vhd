@@ -53,4 +53,11 @@ package neorv32_vpackage is
     constant valu_sbc        : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"23";
     constant valu_msbc       : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"24";
 
+    constant valu_minu       : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"25";
+    constant valu_min        : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"26";
+    constant valu_maxu       : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"27";
+    constant valu_max        : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"28";
+
+    constant valu_merge      : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"29";
+
 end neorv32_vpackage;

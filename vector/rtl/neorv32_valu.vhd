@@ -68,6 +68,9 @@ architecture neorv32_valu_rtl of neorv32_valu is
     -- COMPARISON Signals --
     signal comp_out : std_ulogic_vector(VLEN-1 downto 0);
 
+    -- MERGE Signals --
+    signal merge_out : std_ulogic_vector(VLEN-1 downto 0);
+
     ---------------------------
     --- AUXILIARY FUNCTIONS ---
     ---------------------------
@@ -86,7 +89,6 @@ architecture neorv32_valu_rtl of neorv32_valu is
         -- Byte/Byte2/Byte4 indexation, based on SEW (8, 16, 32 bits) --
         for ii in 0 to ((VLEN / sew) - 1) loop
             case op is
-                -- TODO: CHANGE THIS LOGIC => IT WILL CREATE A LARGE SHIFTER DURING SYNTHESIS --
                 when valu_sll => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_left(unsigned(op_a(sew*ii+(sew-1) downto sew*ii)),  to_integer(unsigned(op_b(sew*ii+shift_bits downto sew*ii)))));
                 when valu_srl => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_right(unsigned(op_a(sew*ii+(sew-1) downto sew*ii)), to_integer(unsigned(op_b(sew*ii+shift_bits downto sew*ii)))));
                 when valu_sra => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_right(signed(op_a(sew*ii+(sew-1) downto sew*ii)),   to_integer(unsigned(op_b(sew*ii+shift_bits downto sew*ii)))));
@@ -111,17 +113,17 @@ architecture neorv32_valu_rtl of neorv32_valu is
             a := op_a(sew*idx+(sew-1) downto sew*idx);
             b := op_b(sew*idx+(sew-1) downto sew*idx);
             case op is
-                when valu_seq  => comp := '1' when (a = b)                      else '0';
-                when valu_sne  => comp := '1' when (not (a = b))                else '0';
-                when valu_sltu => comp := '1' when (unsigned(a) < unsigned(b))  else '0';
-                when valu_slt  => comp := '1' when (signed(a) < signed(b))      else '0';
-                when valu_sleu => comp := '1' when (unsigned(a) <= unsigned(b)) else '0';
-                when valu_sle  => comp := '1' when (signed(a) <= signed(b))     else '0';
-                when valu_sgtu => comp := '1' when (unsigned(a) > unsigned(b))  else '0';
-                when valu_sgt  => comp := '1' when (signed(a) > signed(b))      else '0';
-                when valu_sgeu => comp := '1' when (unsigned(a) >= unsigned(b)) else '0';
-                when valu_sge  => comp := '1' when (signed(a) >= signed(b))     else '0';
-                when others    => comp := '0';
+                when valu_seq                           => comp := '1' when (a = b)                      else '0';
+                when valu_sne                           => comp := '1' when (not (a = b))                else '0';
+                when valu_sltu | valu_minu | valu_maxu  => comp := '1' when (unsigned(a) < unsigned(b))  else '0';
+                when valu_slt  | valu_min  | valu_max   => comp := '1' when (signed(a) < signed(b))      else '0';
+                when valu_sleu                          => comp := '1' when (unsigned(a) <= unsigned(b)) else '0';
+                when valu_sle                           => comp := '1' when (signed(a) <= signed(b))     else '0';
+                when valu_sgtu                          => comp := '1' when (unsigned(a) > unsigned(b))  else '0';
+                when valu_sgt                           => comp := '1' when (signed(a) > signed(b))      else '0';
+                when valu_sgeu                          => comp := '1' when (unsigned(a) >= unsigned(b)) else '0';
+                when valu_sge                           => comp := '1' when (signed(a) >= signed(b))     else '0';
+                when others                             => comp := '0';
             end case;
             result := comp;
         else 
@@ -217,6 +219,13 @@ begin
                 op1_i   <= op1;
                 op0_i   <= op0;
                 alu_out <= comp_out;
+            -- MIN/MAX AND MERGE OPERATIONS --
+            when valu_minu | valu_min | valu_maxu | valu_max | valu_merge =>
+                vsew_i  <= vsew;
+                op2_i   <= op2;
+                op1_i   <= op1;
+                op0_i   <= op0;
+                alu_out <= merge_out;
             -- UNSUPPORTED INSTRUCTION --
             when others =>
                 vsew_i  <= (others => '0');
@@ -422,5 +431,30 @@ begin
             end case;
         end process;
     end generate COMP_DATAPATH;
+
+    -------------------------------
+    -- DATAPATH for Vector Merge --
+    -------------------------------
+    MERGE_DATAPATH: for ii in 0 to ((VLEN / 8) - 1) generate
+        process(all)
+            variable op_a, op_b   : std_ulogic_vector(VLEN-1 downto 0);
+            variable merge_mask   : std_ulogic_vector(VLEN-1 downto 0);
+            variable pre_sel, sel : std_ulogic;
+        begin
+            op_a := op2_i;
+            op_b := op1_i;
+
+            merge_mask := vmask_i when (alu_op = valu_merge) else comp_out;
+
+            pre_sel := merge_mask(ii)   when vsew_i = "000" else
+                       merge_mask(ii/2) when vsew_i = "001" else
+                       merge_mask(ii/4) when vsew_i = "010" else
+                       '0';
+
+            sel := (not pre_sel) when (alu_op = valu_minu) or (alu_op = valu_min) else pre_sel;
+
+            merge_out(8*ii+7 downto 8*ii) <= op_b(8*ii+7 downto 8*ii) when (sel = '1') else op_a(8*ii+7 downto 8*ii);
+        end process;
+    end generate MERGE_DATAPATH;
 
 end neorv32_valu_rtl;
