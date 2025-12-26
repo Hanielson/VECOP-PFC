@@ -63,7 +63,8 @@ architecture neorv32_valu_rtl of neorv32_valu is
     signal logic_final : std_ulogic_vector(VLEN-1 downto 0);
 
     -- SHIFT Signals --
-    signal shift_out : std_ulogic_vector(VLEN-1 downto 0);
+    signal shift_out  : std_ulogic_vector(VLEN-1 downto 0);
+    signal narrow_out : std_ulogic_vector((VLEN/2)-1 downto 0);
 
     -- COMPARISON Signals --
     signal comp_out : std_ulogic_vector(VLEN-1 downto 0);
@@ -89,14 +90,27 @@ architecture neorv32_valu_rtl of neorv32_valu is
         -- Byte/Byte2/Byte4 indexation, based on SEW (8, 16, 32 bits) --
         for ii in 0 to ((VLEN / sew) - 1) loop
             case op is
-                when valu_sll => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_left(unsigned(op_a(sew*ii+(sew-1) downto sew*ii)),  to_integer(unsigned(op_b(sew*ii+shift_bits downto sew*ii)))));
-                when valu_srl => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_right(unsigned(op_a(sew*ii+(sew-1) downto sew*ii)), to_integer(unsigned(op_b(sew*ii+shift_bits downto sew*ii)))));
-                when valu_sra => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_right(signed(op_a(sew*ii+(sew-1) downto sew*ii)),   to_integer(unsigned(op_b(sew*ii+shift_bits downto sew*ii)))));
-                when others   => result(sew*ii+(sew-1) downto sew*ii) := (others => '0');
+                when valu_sll             => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_left(unsigned(op_a(sew*ii+(sew-1) downto sew*ii)),  to_integer(unsigned(op_b(sew*ii+shift_bits downto sew*ii)))));
+                when valu_srl | valu_nsrl => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_right(unsigned(op_a(sew*ii+(sew-1) downto sew*ii)), to_integer(unsigned(op_b(sew*ii+shift_bits downto sew*ii)))));
+                when valu_sra | valu_nsra => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_right(signed(op_a(sew*ii+(sew-1) downto sew*ii)),   to_integer(unsigned(op_b(sew*ii+shift_bits downto sew*ii)))));
+                when others               => result(sew*ii+(sew-1) downto sew*ii) := (others => '0');
             end case;
         end loop;
         return result;
     end function shift_map;
+
+    -- NARROW MAPPING FUNCTION --
+    function narrow_map(sew     : integer;
+                        operand : std_ulogic_vector) return std_ulogic_vector is
+        variable result   : std_ulogic_vector((VLEN/2)-1 downto 0);
+        variable half_sew : integer;
+    begin
+        half_sew := sew/2;
+        for ii in 0 to ((VLEN / sew) - 1) loop
+            result(half_sew*ii+(half_sew-1) downto half_sew*ii) := operand(sew*ii+(half_sew-1) downto sew*ii);
+        end loop;
+        return result;
+    end function narrow_map;
 
     -- COMPARISON OPERATION FUNCTION --
     function compare_map(idx  : integer;
@@ -153,7 +167,9 @@ begin
     --------------------------------------
     -- ALU Internal Operands Definition --
     --------------------------------------
-    process(all) begin
+    process(all) 
+        constant ZEROES : std_ulogic_vector((VLEN/2)-1 downto 0) := (others => '0');
+    begin
         case alu_op is
             -- ADD/SUB + SINGLE-WIDTH WIDENING ADD/SUB + ADD/SUB W/ CARRY/BORROW IN --
             when valu_add | valu_sub | valu_adc | valu_madc | valu_sbc | valu_msbc =>
@@ -212,6 +228,15 @@ begin
                 op1_i   <= op1;
                 op0_i   <= op0;
                 alu_out <= shift_out;
+            -- NARROWING SHIFT OPERATIONS --
+            when valu_nsrl | valu_nsra =>
+                vsew_i  <= "001" when (vsew = "000") else
+                           "010" when (vsew = "001") else
+                           (others => '0');
+                op2_i   <= op2;
+                op1_i   <= op1;
+                op0_i   <= op0;
+                alu_out <= narrow_out & ZEROES when (valu_cyc(0) = '1') else ZEROES & narrow_out;
             -- COMPARISON OPERATIONS --
             when valu_seq | valu_sne  | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
                 vsew_i  <= vsew;
@@ -316,20 +341,20 @@ begin
             variable operand : std_ulogic_vector(VLEN-1 downto 0);
             variable offset_8b_1, offset_8b_2 : natural;
         begin
-            operand := op1_i     when (alu_op = valu_waddu_2sew) or (alu_op = valu_wsubu_2sew) or (alu_op = valu_wadd_2sew) or (alu_op = valu_wsub_2sew) else
+            operand := op1_i     when (alu_op = valu_waddu_2sew) or (alu_op = valu_wsubu_2sew) or (alu_op = valu_wadd_2sew) or (alu_op = valu_wsub_2sew) or (alu_op = valu_nsrl) or (alu_op = valu_nsra) else
                        add_final when (alu_op = valu_waddu) or (alu_op = valu_wsubu) or (alu_op = valu_wadd) or (alu_op = valu_wsub) else
                        op2_i;
             offset_8b_1 := 8*ii;
             offset_8b_2 := 8*(ii+(VLEN/16));
 
             -- INT-EXT: SEW/2 to SEW --
-            if (alu_op = valu_zext_vf2) or (alu_op = valu_waddu_2sew) or (alu_op = valu_wsubu_2sew) then
+            if (alu_op = valu_zext_vf2) or (alu_op = valu_waddu_2sew) or (alu_op = valu_wsubu_2sew) or (alu_op = valu_nsrl) or (alu_op = valu_nsra) or (alu_op = valu_waddu) or (alu_op = valu_wsubu) then
                 case valu_cyc is
                     when "000"  => ext16(16*ii+15 downto 16*ii) <= std_ulogic_vector(resize(unsigned(operand(offset_8b_1+7 downto offset_8b_1)), 16));
                     when "001"  => ext16(16*ii+15 downto 16*ii) <= std_ulogic_vector(resize(unsigned(operand(offset_8b_2+7 downto offset_8b_2)), 16));
                     when others => ext16(16*ii+15 downto 16*ii) <= (others => '0');
                 end case;
-            elsif (alu_op = valu_sext_vf2) or (alu_op = valu_wadd_2sew) or (alu_op = valu_wsub_2sew) then
+            elsif (alu_op = valu_sext_vf2) or (alu_op = valu_wadd_2sew) or (alu_op = valu_wsub_2sew) or (alu_op = valu_wadd) or (alu_op = valu_wsub) then
                 case valu_cyc is
                     when "000"  => ext16(16*ii+15 downto 16*ii) <= std_ulogic_vector(resize(signed(operand(offset_8b_1+7 downto offset_8b_1)), 16));
                     when "001"  => ext16(16*ii+15 downto 16*ii) <= std_ulogic_vector(resize(signed(operand(offset_8b_2+7 downto offset_8b_2)), 16));
@@ -351,7 +376,7 @@ begin
             variable offset_16b_1, offset_16b_2 : natural;
             variable offset_8b_1, offset_8b_2, offset_8b_3, offset_8b_4 : natural;
         begin
-            operand := op1_i     when (alu_op = valu_waddu_2sew) or (alu_op = valu_wsubu_2sew) or (alu_op = valu_wadd_2sew) or (alu_op = valu_wsub_2sew) else
+            operand := op1_i     when (alu_op = valu_waddu_2sew) or (alu_op = valu_wsubu_2sew) or (alu_op = valu_wadd_2sew) or (alu_op = valu_wsub_2sew) or (alu_op = valu_nsrl) or (alu_op = valu_nsra) else
                        add_final when (alu_op = valu_waddu) or (alu_op = valu_wsubu) or (alu_op = valu_wadd) or (alu_op = valu_wsub) else
                        op2_i;
             offset_16b_1 := 16*ii;
@@ -362,13 +387,13 @@ begin
             offset_8b_4  := 8*(ii+(3*(VLEN/32)));
 
             -- INT-EXT: SEW/2 to SEW --
-            if (alu_op = valu_zext_vf2) or (alu_op = valu_waddu_2sew) or (alu_op = valu_wsubu_2sew) then
+            if (alu_op = valu_zext_vf2) or (alu_op = valu_waddu_2sew) or (alu_op = valu_wsubu_2sew) or (alu_op = valu_nsrl) or (alu_op = valu_nsra) or (alu_op = valu_waddu) or (alu_op = valu_wsubu) then
                 case valu_cyc is
                     when "000"  => ext32(32*ii+31 downto 32*ii) <= std_ulogic_vector(resize(unsigned(operand(offset_16b_1+15 downto offset_16b_1)), 32));
                     when "001"  => ext32(32*ii+31 downto 32*ii) <= std_ulogic_vector(resize(unsigned(operand(offset_16b_2+15 downto offset_16b_2)), 32));
                     when others => ext32(32*ii+31 downto 32*ii) <= (others => '0');
                 end case;
-            elsif (alu_op = valu_sext_vf2) or (alu_op = valu_wadd_2sew) or (alu_op = valu_wsub_2sew) then
+            elsif (alu_op = valu_sext_vf2) or (alu_op = valu_wadd_2sew) or (alu_op = valu_wsub_2sew) or (alu_op = valu_wadd) or (alu_op = valu_wsub) then
                 case valu_cyc is
                     when "000"  => ext32(32*ii+31 downto 32*ii) <= std_ulogic_vector(resize(signed(operand(offset_16b_1+15 downto offset_16b_1)), 32));
                     when "001"  => ext32(32*ii+31 downto 32*ii) <= std_ulogic_vector(resize(signed(operand(offset_16b_2+15 downto offset_16b_2)), 32));
@@ -409,12 +434,27 @@ begin
     -------------------------------------
     -- DATAPATH for SHIFT instructions --
     -------------------------------------
-    process(all) begin
+    process(all) 
+        variable shift_op : std_ulogic_vector(VLEN-1 downto 0);
+    begin
+        case alu_op is
+            when valu_nsrl | valu_nsra => shift_op := ext16 when (vsew_i = "001") else ext32 when (vsew_i = "010") else (others => '0');
+            when others                => shift_op := op1_i;
+        end case;
+
         case vsew_i is
-            when "000"  => shift_out <= shift_map(8,  alu_op, op2_i, op1_i);
-            when "001"  => shift_out <= shift_map(16, alu_op, op2_i, op1_i);
-            when "010"  => shift_out <= shift_map(32, alu_op, op2_i, op1_i);
-            when others => shift_out <= (others => '0');
+            when "000" => 
+                shift_out  <= shift_map(8,  alu_op, op2_i, shift_op);
+                narrow_out <= (others => '0');
+            when "001" => 
+                shift_out  <= shift_map(16, alu_op, op2_i, shift_op);
+                narrow_out <= narrow_map(16, shift_out);
+            when "010" => 
+                shift_out  <= shift_map(32, alu_op, op2_i, shift_op);
+                narrow_out <= narrow_map(32, shift_out);
+            when others => 
+                shift_out  <= (others => '0');
+                narrow_out <= (others => '0');
         end case;
     end process;
 
@@ -443,16 +483,12 @@ begin
         begin
             op_a := op2_i;
             op_b := op1_i;
-
             merge_mask := vmask_i when (alu_op = valu_merge) else comp_out;
-
             pre_sel := merge_mask(ii)   when vsew_i = "000" else
                        merge_mask(ii/2) when vsew_i = "001" else
                        merge_mask(ii/4) when vsew_i = "010" else
                        '0';
-
             sel := (not pre_sel) when (alu_op = valu_minu) or (alu_op = valu_min) else pre_sel;
-
             merge_out(8*ii+7 downto 8*ii) <= op_b(8*ii+7 downto 8*ii) when (sel = '1') else op_a(8*ii+7 downto 8*ii);
         end process;
     end generate MERGE_DATAPATH;

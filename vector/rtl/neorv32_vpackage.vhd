@@ -8,6 +8,7 @@ package neorv32_vpackage is
     -- V-ALU Operations IDs --
     --------------------------
     constant VALU_ID_SIZE    : natural := 8;
+
     constant valu_add        : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"00";
     constant valu_sub        : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"01";
     constant valu_rsub       : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"02";
@@ -59,5 +60,8 @@ package neorv32_vpackage is
     constant valu_max        : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"28";
 
     constant valu_merge      : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"29";
+
+    constant valu_nsrl       : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"30";
+    constant valu_nsra       : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"31";
 
 end neorv32_vpackage;
