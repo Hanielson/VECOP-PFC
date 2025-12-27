@@ -3,6 +3,9 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use ieee.math_real.all;
 
+library osvvm;
+use osvvm.RandomPkg.all;
+
 use work.neorv32_vpackage.all;
 
 use std.env.finish;
@@ -298,62 +301,77 @@ begin
     );
 
     stimuli: process
+        variable RV    : RandomPType;
+        constant ITERS : natural := 8;
     begin
+
+        RV.InitSeed(RV'instance_name, TRUE);
 
         RST <= '1';
         wait for 20 ns;
         RST <= '0';
 
-        OP2   <= x"89D78A2589B24E1E1B68CFAF954C2180511B495314841AF1E2572911A6A622F8";
-        OP1   <= x"E4C398F170669F2452AA55724D4281BD6D08E715B65CC010B9E163CECAFE1707";
-        VMASK <= x"A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5";
-        
         -- WAIT FOR A BIT TO MAKE EVALUATIONS A BIT AFTER THE POSEDGE --
         wait for 5 ns;
-        test_op(valu_add,        ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_sub,        ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_rsub,       ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_waddu,      ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_wsubu,      ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_wadd,       ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_wsub,       ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_waddu_2sew, ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_wsubu_2sew, ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_wadd_2sew,  ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_wsub_2sew,  ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_zext_vf2,   ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_sext_vf2,   ALU_OP, VSEW, VALID, INFO);
-        -- test_op(valu_zext_vf4,   ALU_OP, VSEW, VALID, INFO);
-        -- test_op(valu_sext_vf4,   ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_and,        ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_or,         ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_xor,        ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_sll,        ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_srl,        ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_sra,        ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_seq,        ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_sne,        ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_sltu,       ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_slt,        ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_sleu,       ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_sle,        ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_sgtu,       ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_sgt,        ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_sgeu,       ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_sge,        ALU_OP, VSEW, VALID, INFO);
-        -- test_op(valu_adc,        ALU_OP, VSEW, VALID, INFO);
-        -- test_op(valu_madc,       ALU_OP, VSEW, VALID, INFO);
-        -- test_op(valu_sbc,        ALU_OP, VSEW, VALID, INFO);
-        -- test_op(valu_msbc,       ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_minu,       ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_min,        ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_maxu,       ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_max,        ALU_OP, VSEW, VALID, INFO);
-        test_op(valu_merge,      ALU_OP, VSEW, VALID, INFO);
-        -- test_op(valu_nsrl,       ALU_OP, VSEW, VALID, INFO);
-        -- test_op(valu_nsra,       ALU_OP, VSEW, VALID, INFO);
 
-        report "TB REPORT --> PASSES: " & to_string(INFO.TEST_PASS) & " FAILS: " & to_string(INFO.TEST_FAIL) & " (TOTAL COUNT: " & to_string(INFO.TEST_COUNT) & ")";
+        for iter in 0 to ITERS-1 loop
+            -- Resets the Test Results record for this loop --
+            INFO <= (TEST_COUNT => 0, TEST_PASS => 0, TEST_FAIL => 0);
+
+            -- Randomizes values for operands and mask --
+            for ii in 0 to (OP2'length/16)-1 loop
+                OP2(16*ii+15 downto 16*ii)   <= RV.RandSlv(0, 65535, 16);
+                OP1(16*ii+15 downto 16*ii)   <= RV.RandSlv(0, 65535, 16);
+                VMASK(16*ii+15 downto 16*ii) <= RV.RandSlv(0, 65535, 16);
+            end loop;
+            
+            -- Run the instructions tests --
+            test_op(valu_add,        ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_sub,        ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_rsub,       ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_waddu,      ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_wsubu,      ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_wadd,       ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_wsub,       ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_waddu_2sew, ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_wsubu_2sew, ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_wadd_2sew,  ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_wsub_2sew,  ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_zext_vf2,   ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_sext_vf2,   ALU_OP, VSEW, VALID, INFO);
+            -- test_op(valu_zext_vf4,   ALU_OP, VSEW, VALID, INFO);
+            -- test_op(valu_sext_vf4,   ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_and,        ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_or,         ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_xor,        ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_sll,        ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_srl,        ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_sra,        ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_seq,        ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_sne,        ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_sltu,       ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_slt,        ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_sleu,       ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_sle,        ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_sgtu,       ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_sgt,        ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_sgeu,       ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_sge,        ALU_OP, VSEW, VALID, INFO);
+            -- test_op(valu_adc,        ALU_OP, VSEW, VALID, INFO);
+            -- test_op(valu_madc,       ALU_OP, VSEW, VALID, INFO);
+            -- test_op(valu_sbc,        ALU_OP, VSEW, VALID, INFO);
+            -- test_op(valu_msbc,       ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_minu,       ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_min,        ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_maxu,       ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_max,        ALU_OP, VSEW, VALID, INFO);
+            test_op(valu_merge,      ALU_OP, VSEW, VALID, INFO);
+            -- test_op(valu_nsrl,       ALU_OP, VSEW, VALID, INFO);
+            -- test_op(valu_nsra,       ALU_OP, VSEW, VALID, INFO);
+
+            report "TEST INFO   => ITER: " & to_string(iter) & " OP2: " & to_hstring(OP2) & " OP1: " & to_hstring(OP1) & " VMASK: " & to_hstring(VMASK);
+            report "TEST REPORT => PASSES: " & to_string(INFO.TEST_PASS) & " FAILS: " & to_string(INFO.TEST_FAIL) & " (TOTAL COUNT: " & to_string(INFO.TEST_COUNT) & ")";
+        end loop;
 
         finish;
     end process;
