@@ -61,7 +61,7 @@ package neorv32_vpackage is
 
     constant valu_merge      : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"29";
 
-    constant valu_nsrl       : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"30";
-    constant valu_nsra       : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"31";
+    constant valu_nsrl       : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"2A";
+    constant valu_nsra       : std_ulogic_vector(VALU_ID_SIZE-1 downto 0) := x"2B";
 
 end neorv32_vpackage;

@@ -156,10 +156,18 @@ begin
             valu_cyc   <= "000";
             valu_state <= VALU_IDLE;
         elsif rising_edge(clk) then
-            valu_cyc   <= std_ulogic_vector(unsigned(valu_cyc) + 1) when (valu_state = VALU_EXEC) else valu_cyc;
+            case alu_op is
+                when valu_waddu | valu_wsubu | valu_wadd | valu_wsub | valu_waddu_2sew | valu_wsubu_2sew | valu_wadd_2sew | valu_wsub_2sew | valu_zext_vf2 | valu_sext_vf2 =>
+                    valu_cyc <= "000" when (valu_cyc = "001") or (valu_state = VALU_IDLE) else std_ulogic_vector(unsigned(valu_cyc) + 1);
+                when valu_zext_vf4 | valu_sext_vf4 =>
+                    valu_cyc <= "000" when (valu_cyc = "011") or (valu_state = VALU_IDLE) else std_ulogic_vector(unsigned(valu_cyc) + 1);
+                when others =>
+                    valu_cyc <= "000" when (valu_cyc = "111") or (valu_state = VALU_IDLE) else std_ulogic_vector(unsigned(valu_cyc) + 1);
+            end case;
+
             case valu_state is
                 when VALU_IDLE => valu_state <= VALU_EXEC when (valid = '1') else VALU_IDLE;
-                when VALU_EXEC => valu_state <= VALU_IDLE when (and valu_cyc) else VALU_EXEC;
+                when VALU_EXEC => valu_state <= VALU_IDLE when (valid = '0') else VALU_EXEC;
             end case;
         end if;
     end process;
@@ -180,9 +188,7 @@ begin
                 alu_out <= add_final;
             -- SINGLE-WIDTH WIDENING OPERATIONS --
             when valu_waddu | valu_wsubu | valu_wadd | valu_wsub =>
-                vsew_i  <= "001" when (vsew = "000") else
-                           "010" when (vsew = "001") else
-                           (others => '0');
+                vsew_i  <= vsew;
                 op2_i   <= op2;
                 op1_i   <= op1;
                 op0_i   <= op0;
@@ -197,7 +203,8 @@ begin
                 op2_i   <= op2;
                 op1_i   <= op1;
                 op0_i   <= op0;
-                alu_out <= add_final;
+                alu_out <= add_final when (vsew = "000") or (vsew = "001") else
+                           (others => '0');
             -- REVERSE SUB --
             when valu_rsub =>
                 vsew_i  <= vsew;
@@ -211,8 +218,8 @@ begin
                 op2_i   <= op2;
                 op1_i   <= op1;
                 op0_i   <= op0;
-                alu_out <= ext16 when (vsew = "000") else
-                           ext32 when (vsew = "001") else
+                alu_out <= ext16 when (vsew = "001") else
+                           ext32 when (vsew = "010") else
                            (others => '0');
             -- BITWISE LOGICAL --
             when valu_and | valu_or | valu_xor =>
@@ -324,9 +331,15 @@ begin
                      (others => '0');
             op_b  := ext_b when (alu_op = valu_waddu_2sew) or (alu_op = valu_wsubu_2sew) or (alu_op = valu_wadd_2sew) or (alu_op = valu_wsub_2sew) else 
                      op1_i;
-
-            add_temp(9*ii+8 downto 9*ii) <= std_ulogic_vector(resize(unsigned(op_a(8*ii+7 downto 8*ii)), 9) + resize(unsigned(op_b(8*ii+7 downto 8*ii)), 9) + vcarry(ii)) when (alu_op = valu_add) else
-                                            std_ulogic_vector(resize(unsigned(op_a(8*ii+7 downto 8*ii)), 9) - resize(unsigned(op_b(8*ii+7 downto 8*ii)), 9) + vcarry(ii));
+            
+            case alu_op is
+                when valu_add | valu_waddu_2sew | valu_wadd_2sew | valu_waddu | valu_wadd | valu_adc | valu_madc =>
+                    add_temp(9*ii+8 downto 9*ii) <= std_ulogic_vector(resize(unsigned(op_a(8*ii+7 downto 8*ii)), 9) + resize(unsigned(op_b(8*ii+7 downto 8*ii)), 9) + vcarry(ii));
+                when valu_sub | valu_wsubu_2sew | valu_wsub_2sew | valu_wsubu | valu_wsub | valu_sbc | valu_msbc | valu_rsub =>
+                    add_temp(9*ii+8 downto 9*ii) <= std_ulogic_vector(resize(unsigned(op_a(8*ii+7 downto 8*ii)), 9) - resize(unsigned(op_b(8*ii+7 downto 8*ii)), 9) + vcarry(ii));
+                when others =>
+                    add_temp(9*ii+8 downto 9*ii) <= (others => '0');
+            end case;
         end process;
 
         -- Final ADD result --
