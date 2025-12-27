@@ -336,7 +336,7 @@ begin
                 when valu_add | valu_waddu_2sew | valu_wadd_2sew | valu_waddu | valu_wadd | valu_adc | valu_madc =>
                     add_temp(9*ii+8 downto 9*ii) <= std_ulogic_vector(resize(unsigned(op_a(8*ii+7 downto 8*ii)), 9) + resize(unsigned(op_b(8*ii+7 downto 8*ii)), 9) + vcarry(ii));
                 when valu_sub | valu_wsubu_2sew | valu_wsub_2sew | valu_wsubu | valu_wsub | valu_sbc | valu_msbc | valu_rsub =>
-                    add_temp(9*ii+8 downto 9*ii) <= std_ulogic_vector(resize(unsigned(op_a(8*ii+7 downto 8*ii)), 9) - resize(unsigned(op_b(8*ii+7 downto 8*ii)), 9) + vcarry(ii));
+                    add_temp(9*ii+8 downto 9*ii) <= std_ulogic_vector(resize(unsigned(op_a(8*ii+7 downto 8*ii)), 9) - resize(unsigned(op_b(8*ii+7 downto 8*ii)), 9) - vcarry(ii));
                 when others =>
                     add_temp(9*ii+8 downto 9*ii) <= (others => '0');
             end case;
