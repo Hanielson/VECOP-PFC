@@ -16,10 +16,6 @@ end valu_tb;
 architecture tb of valu_tb is
 
     component neorv32_valu is
-        generic(
-            VLEN : natural;
-            XLEN : natural
-        );
         port(
             clk     : in std_ulogic;
             rst     : in std_ulogic;
