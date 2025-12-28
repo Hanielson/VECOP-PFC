@@ -6,24 +6,19 @@ use ieee.math_real.all;
 use work.neorv32_vpackage.all;
 
 entity neorv32_valu is
-    generic(
-        VLEN : natural := 256;
-        XLEN : natural := 32
-    );
     port(
         -- Clock and Reset --
         clk     : in std_ulogic;
         rst     : in std_ulogic;
 
-        -- Valid Operation --
+        -- ALU Operation ID and Valid --
+        alu_op  : in std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
         valid   : in std_ulogic;
 
         -- Vector Operands --
         op2     : in std_ulogic_vector(VLEN-1 downto 0);
         op1     : in std_ulogic_vector(VLEN-1 downto 0);
         op0     : in std_ulogic_vector(VLEN-1 downto 0);
-        -- ALU Operation ID --
-        alu_op  : in std_ulogic_vector(VALU_OP_SIZE-1 downto 0);
         -- Vector Mask --
         vmask   : in std_ulogic_vector(VLEN-1 downto 0);
         -- Vector Selected Element Width --

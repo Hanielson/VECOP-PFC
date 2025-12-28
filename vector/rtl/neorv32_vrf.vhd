@@ -6,19 +6,14 @@ use ieee.math_real.all;
 use work.neorv32_vpackage.all;
 
 entity neorv32_vrf is
-    generic(
-        VLEN       : natural := 256;
-        XLEN       : natural := 32;
-        ADDR_WIDTH : natural := 5
-    );
     port(
         -- Clock --
         clk     : in std_ulogic;
 
         -- Address Ports --
-        vs2     : in std_ulogic_vector(ADDR_WIDTH-1 downto 0);
-        vs1     : in std_ulogic_vector(ADDR_WIDTH-1 downto 0);
-        vd      : in std_ulogic_vector(ADDR_WIDTH-1 downto 0);
+        vs2     : in std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        vs1     : in std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        vd      : in std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
 
         -- Write Byte Enable --
         wr_ben  : in std_ulogic_vector((VLEN/8)-1 downto 0);
@@ -44,7 +39,7 @@ architecture neorv32_vrf_rtl of neorv32_vrf is
     -- NOTE: 2 copies of the VRF are needed to enable implementation via BRAMs, as each BRAM supports, at most, --
     --       2R+2W at the same clock cycle (Dual Ported RAM)                                                    --
     type vector_t   is array ((VLEN/8)-1 downto 0)        of std_ulogic_vector(7 downto 0);
-    type vregfile_t is array ((2**ADDR_WIDTH)-1 downto 0) of vector_t;
+    type vregfile_t is array ((2**VREF_ADDR_WIDTH)-1 downto 0) of vector_t;
     signal vregfile_0 : vregfile_t;
     signal vregfile_1 : vregfile_t;
 
