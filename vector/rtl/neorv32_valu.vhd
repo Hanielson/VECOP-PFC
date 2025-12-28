@@ -23,7 +23,7 @@ entity neorv32_valu is
         op1     : in std_ulogic_vector(VLEN-1 downto 0);
         op0     : in std_ulogic_vector(VLEN-1 downto 0);
         -- ALU Operation ID --
-        alu_op  : in std_ulogic_vector(7 downto 0);
+        alu_op  : in std_ulogic_vector(VALU_OP_SIZE-1 downto 0);
         -- Vector Mask --
         vmask   : in std_ulogic_vector(VLEN-1 downto 0);
         -- Vector Selected Element Width --
@@ -290,7 +290,6 @@ begin
                     when "000"  => vcarry_in(ii) <= vmask_i(ii);
                     when "001"  => vcarry_in(ii) <= vmask_i(ii/2) when ((ii mod 2) = 0) else '0';
                     when "010"  => vcarry_in(ii) <= vmask_i(ii/4) when ((ii mod 4) = 0) else '0';
-                    when "011"  => vcarry_in(ii) <= vmask_i(ii/8) when ((ii mod 8) = 0) else '0';
                     when others => vcarry_in(ii) <= '0';
                 end case;
             else
