@@ -42,9 +42,6 @@ architecture tb of valu_tb is
     signal ALU_OP  : std_ulogic_vector(7 downto 0)   := (others => '0');
     signal ALU_OUT : std_ulogic_vector(255 downto 0) := (others => '0');
 
-    type state_t is (IDLE, EXECUTE);
-    signal STATE : state_t := IDLE;
-
     type test_info_t is record
         TEST_COUNT : integer;
         TEST_PASS  : integer;
@@ -84,7 +81,6 @@ architecture tb of valu_tb is
         valid_o <= '0';
         wait for 20 ns;
         valid_o <= '1';
-        wait for 20 ns;
         for cyc in 0 to 7 loop
             tinfo.TEST_COUNT <= tinfo.TEST_COUNT + 1;
             if check_type8 /= out_type8 then
@@ -107,7 +103,6 @@ architecture tb of valu_tb is
         valid_o <= '0';
         wait for 20 ns;
         valid_o <= '1';
-        wait for 20 ns;
         for cyc in 0 to 7 loop
             tinfo.TEST_COUNT <= tinfo.TEST_COUNT + 1;
             if check_type16 /= out_type16 then
@@ -130,7 +125,6 @@ architecture tb of valu_tb is
         valid_o <= '0';
         wait for 20 ns;
         valid_o <= '1';
-        wait for 20 ns;
         for cyc in 0 to 7 loop
             tinfo.TEST_COUNT <= tinfo.TEST_COUNT + 1;
             if check_type32 /= out_type32 then
@@ -251,11 +245,9 @@ begin
 
     process(CLK, RST) begin
         if (RST) then
-            STATE <= IDLE;
             CYC   <= (others => '0');
         elsif rising_edge(CLK) then
-            STATE <= EXECUTE when (VALID = '1') else IDLE;
-            CYC   <= std_ulogic_vector(unsigned(CYC) + 1) when (STATE = EXECUTE) else "000";
+            CYC   <= std_ulogic_vector(unsigned(CYC) + 1) when (VALID = '1') else "000";
         end if;    
     end process;
 
