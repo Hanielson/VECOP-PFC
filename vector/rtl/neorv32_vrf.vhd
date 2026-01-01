@@ -38,10 +38,10 @@ architecture neorv32_vrf_rtl of neorv32_vrf is
     -- Vector Register File --
     -- NOTE: 2 copies of the VRF are needed to enable implementation via BRAMs, as each BRAM supports, at most, --
     --       2R+2W at the same clock cycle (Dual Ported RAM)                                                    --
-    type vector_t   is array ((VLEN/8)-1 downto 0)        of std_ulogic_vector(7 downto 0);
+    type vector_t   is array ((VLEN/8)-1 downto 0) of std_ulogic_vector(7 downto 0);
     type vregfile_t is array ((2**VREF_ADDR_WIDTH)-1 downto 0) of vector_t;
-    signal vregfile_0 : vregfile_t;
-    signal vregfile_1 : vregfile_t;
+    signal vregfile_0 : vregfile_t := (others => (others => x"1F"));
+    signal vregfile_1 : vregfile_t := (others => (others => x"1F"));
 
     attribute ramstyle : string;
     attribute ramstyle of vregfile_0 : signal is "M9K";

@@ -9,7 +9,11 @@ entity neorv32_vecop is
     port(
         -- Clock and Reset --
         clk     : in std_ulogic;
-        rst     : in std_ulogic
+        rst     : in std_ulogic;
+
+        -- HACK: these ports should be removed after testing --
+        vinst       : in std_ulogic_vector(XLEN-1 downto 0);
+        vinst_valid : in std_ulogic
     );
 end neorv32_vecop;
 
@@ -18,6 +22,33 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
     ------------------------------
     --- Component Declarations ---
     ------------------------------
+    component neorv32_vcu is
+        port(
+            clk         : in std_ulogic;
+            rst         : in std_ulogic;
+            vinst       : in std_ulogic_vector(XLEN-1 downto 0);
+            vinst_valid : in std_ulogic;
+            vq_full     : in std_ulogic;
+            scal2       : in std_ulogic_vector(XLEN-1 downto 0);
+            scal1       : in std_ulogic_vector(XLEN-1 downto 0);
+            vmask       : in std_ulogic_vector(VLEN-1 downto 0);
+            vstart      : in std_ulogic_vector(XLEN-1 downto 0);
+            vl          : in std_ulogic_vector(XLEN-1 downto 0);
+            vill        : in std_ulogic;
+            vma         : in std_ulogic;
+            vta         : in std_ulogic;
+            vsew        : in std_ulogic_vector(2 downto 0);
+            vlmul       : in std_ulogic_vector(2 downto 0);
+            sld_valid   : in std_ulogic;
+            lsu_done    : in std_ulogic;
+            memtrp_id   : in std_ulogic_vector(1 downto 0);
+            memtrp_addr : in std_ulogic_vector(XLEN-1 downto 0);
+            vctrl       : out vctrl_bus_t;
+            cp_result   : out std_ulogic_vector(XLEN-1 downto 0);
+            cp_valid    : out std_ulogic
+        );
+    end component neorv32_vcu;
+
     component neorv32_vrf is
         port(
             clk     : in std_ulogic;
@@ -55,6 +86,21 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
     signal vctrl : vctrl_bus_t;
     signal vmask : std_ulogic_vector(VLEN-1 downto 0);
 
+    -- VECOP Output Signals --
+    signal cp_result : std_ulogic_vector(XLEN-1 downto 0);
+    signal cp_valid  : std_ulogic;
+
+    -- VCU Signals --
+    -- signal vinst           : std_ulogic_vector(XLEN-1 downto 0);
+    -- signal vinst_valid     : std_ulogic;
+    signal vq_full         : std_ulogic;
+    signal vq_scal2        : std_ulogic_vector(XLEN-1 downto 0);
+    signal vq_scal1        : std_ulogic_vector(XLEN-1 downto 0);
+    signal sld_valid       : std_ulogic;
+    signal lsu_done        : std_ulogic;
+    signal lsu_memtrp_id   : std_ulogic_vector(1 downto 0);
+    signal lsu_memtrp_addr : std_ulogic_vector(XLEN-1 downto 0);
+
     -- vtype CSR Fields (some of them...) --
     signal vill  : std_ulogic;
     signal vma   : std_ulogic;
@@ -87,8 +133,32 @@ begin
     ----------------------------------
     --- Sub-Modules Instantiations ---
     ----------------------------------
-    vrf: entity work.neorv32_vrf
-    port map (
+    vcu: entity work.neorv32_vcu port map (
+        clk         => clk,
+        rst         => rst,
+        vinst       => vinst,
+        vinst_valid => vinst_valid,
+        vq_full     => vq_full,
+        scal2       => vq_scal2,
+        scal1       => vq_scal1,
+        vmask       => vmask,
+        vstart      => vcsr.vstart,
+        vl          => vcsr.vl,
+        vill        => vill,
+        vma         => vma,
+        vta         => vta,
+        vsew        => vsew,
+        vlmul       => vlmul,
+        sld_valid   => sld_valid,
+        lsu_done    => lsu_done,
+        memtrp_id   => lsu_memtrp_id,
+        memtrp_addr => lsu_memtrp_addr,
+        vctrl       => vctrl,
+        cp_result   => cp_result,
+        cp_valid    => cp_valid
+    );
+
+    vrf: entity work.neorv32_vrf port map (
         clk     => clk,
         vs2     => vctrl.vrf_vs2,
         vs1     => vctrl.vrf_vs1,
@@ -101,8 +171,7 @@ begin
         vmask   => vmask
     );
 
-    valu: entity work.neorv32_valu
-    port map (
+    valu: entity work.neorv32_valu port map (
         clk     => clk,
         rst     => rst,
         alu_op  => vctrl.valu_op,

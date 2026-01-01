@@ -49,24 +49,27 @@ end neorv32_vcu;
 
 architecture neorv32_vcu_rtl of neorv32_vcu is
 
-    type ctrl_state_t is (IDLE, DECODE, CSR_WR, ALU_DISPATCH, ALU_EXEC, INVALID);
+    type ctrl_state_t is (IDLE, DECODE, CSR_WR, ALU_START, ALU_EXEC, INVALID);
     signal state : ctrl_state_t;
 
     signal vinst_i : std_ulogic_vector(XLEN-1 downto 0);
-    signal vlmul_i : std_ulogic_vector(2 downto 0);
+    signal vlmul_i : std_ulogic_vector(3 downto 0);
 
-    signal dest   : std_ulogic_vector(4 downto 0);
-    signal src1   : std_ulogic_vector(4 downto 0);
-    signal src2   : std_ulogic_vector(4 downto 0);
+    signal dest    : std_ulogic_vector(4 downto 0);
+    signal dest_ff : std_ulogic_vector(4 downto 0);
+    signal src1    : std_ulogic_vector(4 downto 0);
+    signal src2    : std_ulogic_vector(4 downto 0);
 
-    signal funct3 : std_ulogic_vector(5 downto 0);
+    signal funct3 : std_ulogic_vector(2 downto 0);
+    signal vs1    : std_ulogic_vector(4 downto 0);
+    signal vs2    : std_ulogic_vector(4 downto 0);
     signal vm     : std_ulogic;
-    signal funct6 : std_ulogic_vector(2 downto 0);
+    signal funct6 : std_ulogic_vector(5 downto 0);
 
     signal valu_op : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
 
     signal cyc_count : std_ulogic_vector(2 downto 0);
-    signal mul_count : std_ulogic_vector(2 downto 0);
+    signal mul_count : std_ulogic_vector(3 downto 0);
 
 begin
 
@@ -75,10 +78,10 @@ begin
     ----------------------
     process(all) begin
         case vlmul is
-            when "001"  => vlmul_i <= "001";
-            when "010"  => vlmul_i <= "011";
-            when "011"  => vlmul_i <= "111";
-            when others => vlmul_i <= "000";
+            when "001"  => vlmul_i <= "0010";
+            when "010"  => vlmul_i <= "0100";
+            when "011"  => vlmul_i <= "1000";
+            when others => vlmul_i <= "0001";
         end case;
     end process;
 
@@ -87,6 +90,8 @@ begin
     ---------------------------------------------------------------
     process(all) begin
         funct3 <= vinst_i(14 downto 12);
+        vs1    <= vinst_i(19 downto 15);
+        vs2    <= vinst_i(24 downto 20);
         vm     <= vinst_i(25);
         funct6 <= vinst_i(31 downto 26);
     end process;
@@ -100,7 +105,11 @@ begin
     begin
         if (rst = '1') then
             cyc_count <= (others => '0');
+            dest      <= (others => '0');
+            src1      <= (others => '0');
+            src2      <= (others => '0');
             mul_count <= (others => '0');
+            dest_ff   <= (others => '0');
             vinst_i   <= (others => '0');
             state     <= IDLE;
         elsif rising_edge(clk) then
@@ -108,7 +117,11 @@ begin
                 -- Waiting for Valid Instruction --
                 when IDLE =>
                     cyc_count <= (others => '0');
+                    dest      <= (others => '0');
+                    src1      <= (others => '0');
+                    src2      <= (others => '0');
                     mul_count <= (others => '0');
+                    dest_ff   <= (others => '0');
                     -- If received a valid instruction indication... --
                     if (vinst_valid = '1') then
                         vinst_i <= vinst;
@@ -121,59 +134,81 @@ begin
                 -- Instruction Decode Stage --
                 when DECODE =>
                     -- Instruction Operands/Destination --
+                    -- NOTE: we store src2/src1 in registers to operate on them during multi-cycle operations, --
+                    --       however the original values are preserved in vs2/vs1 signals for ALU op decoding  --
                     dest   <= vinst_i(11 downto 7);
                     src1   <= vinst_i(19 downto 15);
                     src2   <= vinst_i(24 downto 20);
                     
                     -- Operation State --
                     opcode := vinst_i(6 downto 0);
-                    if    (opcode = vop_load)   then state <= (others => '0');
-                    elsif (opcode = vop_store)  then state <= (others => '0');
-                    elsif (opcode = vop_arith)  then state <= ALU_DISPATCH;
-                    elsif (opcode = vop_config) then state <= CSR_WR;
-                    else                             state <= INVALID;
+                    if (opcode = vop_load)   then
+                        state <= IDLE;
+                    elsif (opcode = vop_store)  then
+                        state <= IDLE;
+                    elsif (opcode = vop_arith)  then
+                        if (valu_op = valu_invalid) then 
+                            state <= INVALID;
+                        else
+                            state <= ALU_START;
+                        end if;
+                    elsif (opcode = vop_config) then
+                        state <= CSR_WR;
+                    else                             
+                        state <= INVALID;
                     end if;
                 
                 -- CSR Write State --
                 when CSR_WR =>
                     state <= IDLE;
 
-                -- ALU Dispatch State--
-                when ALU_DISPATCH =>
-                    if (valu_op = valu_invalid) then state <= INVALID;
-                    else                             state <= ALU_EXEC;
-                    end if;
-
-                -- ALU Execution State --
-                when ALU_EXEC =>
+                -- ALU Startup/Execution State --
+                when ALU_START | ALU_EXEC =>
                     case valu_op is
-                        when valu_waddu      | valu_wsubu      | valu_wadd      | valu_wsub      | 
-                             valu_waddu_2sew | valu_wsubu_2sew | valu_wadd_2sew | valu_wsub_2sew | 
-                             valu_zext_vf2   | valu_sext_vf2 => max_cyc := "001"
-                        when valu_zext_vf4 | valu_sext_vf4   => max_cyc := "011"
-                        when others                          => max_cyc := "000"
+                        when valu_waddu      | valu_wsubu      |
+                             valu_wadd       | valu_wsub       |
+                             valu_waddu_2sew | valu_wsubu_2sew |
+                             valu_wadd_2sew  | valu_wsub_2sew  |
+                             valu_zext_vf2   | valu_sext_vf2   |
+                             valu_nsrl       | valu_nsra   => max_cyc := "001";
+                        when valu_zext_vf4 | valu_sext_vf4 => max_cyc := "011";
+                        when others                        => max_cyc := "000";
                     end case;
 
                     if (cyc_count = max_cyc) then
                         cyc_count <= (others => '0');
-                        if (mul_count = vlmul_i) then 
-                            state <= IDLE;
-                        else
-                            src2      <= std_ulogic_vector(unsigned(src2) + 1);
-                            dest      <= std_ulogic_vector(unsigned(dest) + 1);
-                            mul_count <= std_ulogic_vector(unsigned(mul_count) + 1);
-                            state     <= ALU_EXEC;
-                        end if;
+                        dest      <= std_ulogic_vector(unsigned(dest) + 1);
+                        src1      <= std_ulogic_vector(unsigned(src1) + 1);
+                        src2      <= std_ulogic_vector(unsigned(src2) + 1);
+                        mul_count <= std_ulogic_vector(unsigned(mul_count) + 1);
                     else
-                        if (valu_op = valu_waddu_2sew) or (valu_op = valu_wsubu_2sew) or (valu_op = valu_wadd_2sew) or (valu_op = valu_wsub_2sew) then
+                        cyc_count <= std_ulogic_vector(unsigned(cyc_count) + 1);
+                        
+                        if (valu_op /= valu_nsrl) and (valu_op /= valu_nsra) then
+                            dest <= std_ulogic_vector(unsigned(dest) + 1);
+                        end if;
+
+                        if (valu_op = valu_waddu_2sew) or (valu_op = valu_wsubu_2sew) or 
+                           (valu_op = valu_wadd_2sew)  or (valu_op = valu_wsub_2sew)  or
+                           (valu_op = valu_nsrl)       or (valu_op = valu_nsra)       then
                             src2 <= std_ulogic_vector(unsigned(src2) + 1);
                         end if;
-                        dest      <= std_ulogic_vector(unsigned(dest) + 1);
-                        cyc_count <= std_ulogic_vector(unsigned(cyc_count) + 1);
-                        state     <= ALU_EXEC;
                     end if;
+
+                    if (cyc_count = "000") and (mul_count = vlmul_i) then
+                        state <= IDLE;
+                    else
+                        state <= ALU_EXEC;
+                    end if;
+
+                    -- Delays Destination in 1 cycle because of Read delay --
+                    dest_ff <= dest;
                     
-                -- INVALID STATE --
+                -- Invalid Instruction State --
+                -- TODO: for now we just return to IDLE, but vill needs to be set... --
+                when INVALID =>
+                    state <= IDLE;
+
                 when others =>
                     state <= INVALID;
             end case;
@@ -184,94 +219,127 @@ begin
     --- Output Generation Logic --
     ------------------------------
     process(all)
-        variable vs2     : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
-        variable vs1     : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
-        variable vd      : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
-        variable byte_en : std_ulogic_vector((VLEN/8)-1 downto 0);
-        variable wr_sel  : std_ulogic_vector(1 downto 0);
-        variable imm     : std_ulogic_vector(4 downto 0);
-        variable sel_op2 : std_ulogic;
-        variable sel_op1 : std_ulogic;
-        variable sel_imm : std_ulogic;
-        variable scalar  : std_ulogic_vector(XLEN-1 downto 0);
+        variable vs2        : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        variable vs1        : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        variable vd         : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        variable valu_valid : std_ulogic;
+        variable byte_en    : std_ulogic_vector((VLEN/8)-1 downto 0);
+        variable wr_sel     : std_ulogic_vector(1 downto 0);
+        variable imm        : std_ulogic_vector(4 downto 0);
+        variable sel_op2    : std_ulogic;
+        variable sel_op1    : std_ulogic;
+        variable sel_imm    : std_ulogic;
+        variable scalar     : std_ulogic_vector(XLEN-1 downto 0);
     begin
         case state is
             -- Waiting for Valid Instruction --
             when IDLE =>
                 vctrl <= (
+                    -- VI-Queue Control --
                     viq_nxt => '1',
-                    others  => '0'
-                );
-                cp_result <= (others => '0');
-                cp_valid  <= '0';
-            
-            -- CSR Write State --
-            -- when CSR_WR =>
-
-            -- ALU Dispatch State --
-            when ALU_DISPATCH =>
-                vctrl <= (
-                    valu_op      => valu_op,
-                    valu_valid   => '1',
-                    others       => '0'
+                    -- CSR Control --
+                    csr_wen => (others => '0'), csr_vtype_n  => (others => '0'), csr_vl_n => (others => '0'), csr_vstart_n => (others => '0'),
+                    -- V-SLD Control --
+                    sld_en => '0', sld_shift => '0', sld_up => '0',
+                    -- VRF Control --
+                    vrf_vs2 => (others => '0'), vrf_vs1 => (others => '0'), vrf_vd => (others => '0'), vrf_ben => (others => '0'), vrf_wr_sel => (others => '0'),
+                    -- O-SEL Control --
+                    osel_imm => (others => '0'), osel_sel_op2 => '0', osel_sel_op1 => '0', osel_sel_imm => '0', osel_scalar => (others => '0'),
+                    -- V-ALU Control --
+                    valu_op => (others => '0'), valu_valid => '0',
+                    -- V-LSU Control --
+                    vlsu_wen => '0', vlsu_addr => (others => '0'), vlsu_strd => (others => '0'), vlsu_mode => '0', vlsu_ordrd => '0', vlsu_vme => '0', vlsu_width => (others => '0'), vlsu_start => '0'
                 );
                 cp_result <= (others => '0');
                 cp_valid  <= '0';
 
             -- ALU Execution State --
-            when ALU_EXEC =>
+            when ALU_START | ALU_EXEC =>
                 -- Operation Independent Signals --
                 vs2     := src2;
                 vs1     := src1;
-                vd      := dest;
+                vd      := dest_ff;
                 imm     := src1;
                 sel_op2 := '0';
                 scalar  := scal1;
                 wr_sel  := "00";
                 
                 -- Operation/Cycle Dependent Signals --
-                -- TODO: ADD BYTE ENABLE GENERATION LOGIC --
-                byte_en := x"FFFFFFFF";
+                if (state = ALU_START) then
+                    valu_valid := '0';
+                    byte_en := (others => '0');
+                else
+                    valu_valid := '1';
+                    if (vm = '1') then
+                        -- TODO: MASKING LOGIC NEEDS TO BE IMPLEMENTED --
+                        byte_en := x"FFFFFFFF";
+                    else
+                        case valu_op is
+                            -- Narrowing Operations --
+                            when valu_nsrl | valu_nsra =>
+                                if (cyc_count(0) = '1') then
+                                    byte_en := x"FFFF0000";
+                                else
+                                    byte_en := x"0000FFFF";
+                                end if;
+
+                            -- Other Operation Types --
+                            when others =>
+                                byte_en := x"FFFFFFFF";
+                        end case;
+                    end if;
+                end if;
+
                 case funct3 is
                     -- Immediate --
-                    when "011" =>
-                        sel_op1 := '1';
-                        sel_imm := '0';
-                    
+                    when "011"                 => sel_op1 := '1'; sel_imm := '0';
                     -- Scalar --
-                    when "100" | "101" | "110" =>
-                        sel_op1 := '1';
-                        sel_imm := '1';
-
+                    when "100" | "101" | "110" => sel_op1 := '1'; sel_imm := '1';
                     -- Vector Operand --
-                    when others =>
-                        sel_op1 := '0';
-                        sel_imm := '0';
+                    when others                => sel_op1 := '0'; sel_imm := '0';
                 end case;
 
                 vctrl <= (
-                    vrf_vs2      => vs2,
-                    vrf_vs1      => vs1,
-                    vrf_vd       => vd,
-                    vrf_ben      => byte_en,
-                    vrf_wr_sel   => wr_sel,
-                    osel_imm     => imm,
-                    osel_sel_op2 => sel_op2,
-                    osel_sel_op1 => sel_op1,
-                    osel_sel_imm => sel_imm,
-                    osel_scalar  => scalar,
-                    valu_op      => valu_op,
-                    valu_valid   => '1',
-                    others       => '0'
+                    -- VI-Queue Control --
+                    viq_nxt => '0',
+                    -- CSR Control --
+                    csr_wen => (others => '0'), csr_vtype_n  => (others => '0'), csr_vl_n => (others => '0'), csr_vstart_n => (others => '0'),
+                    -- V-SLD Control --
+                    sld_en => '0', sld_shift => '0', sld_up => '0',
+                    -- VRF Control --
+                    vrf_vs2 => vs2, vrf_vs1 => vs1, vrf_vd => vd, vrf_ben => byte_en, vrf_wr_sel => wr_sel,
+                    -- O-SEL Control --
+                    osel_imm => imm, osel_sel_op2 => sel_op2, osel_sel_op1 => sel_op1, osel_sel_imm => sel_imm, osel_scalar => scalar,
+                    -- V-ALU Control --
+                    valu_op => valu_op, valu_valid => valu_valid,
+                    -- V-LSU Control --
+                    vlsu_wen => '0', vlsu_addr => (others => '0'), vlsu_strd => (others => '0'), vlsu_mode => '0', vlsu_ordrd => '0', vlsu_vme => '0', vlsu_width => (others => '0'), vlsu_start => '0'
                 );
+                cp_result <= (others => '0');
+                cp_valid  <= '0';
 
             -- INVALID STATE --
             when others =>
-                vctrl     <= (others => '0');
+                vctrl <= (
+                    -- VI-Queue Control --
+                    viq_nxt => '0',
+                    -- CSR Control --
+                    csr_wen => (others => '0'), csr_vtype_n  => (others => '0'), csr_vl_n => (others => '0'), csr_vstart_n => (others => '0'),
+                    -- V-SLD Control --
+                    sld_en => '0', sld_shift => '0', sld_up => '0',
+                    -- VRF Control --
+                    vrf_vs2 => (others => '0'), vrf_vs1 => (others => '0'), vrf_vd => (others => '0'), vrf_ben => (others => '0'), vrf_wr_sel => (others => '0'),
+                    -- O-SEL Control --
+                    osel_imm => (others => '0'), osel_sel_op2 => '0', osel_sel_op1 => '0', osel_sel_imm => '0', osel_scalar => (others => '0'),
+                    -- V-ALU Control --
+                    valu_op => (others => '0'), valu_valid => '0',
+                    -- V-LSU Control --
+                    vlsu_wen => '0', vlsu_addr => (others => '0'), vlsu_strd => (others => '0'), vlsu_mode => '0', vlsu_ordrd => '0', vlsu_vme => '0', vlsu_width => (others => '0'), vlsu_start => '0'
+                );
                 cp_result <= (others => '0');
                 cp_valid  <= '0';
         end case;
-    end;
+    end process;
 
     --------------------------------
     --- ALU Operation Definition ---
@@ -281,28 +349,28 @@ begin
             -- OPIVV, OPIVX or OPIVI --
             when "000" | "100" | "011" =>
                 if     (funct6 = "000000")                        then valu_op <= valu_add;
-                elsif ((funct6 = "000010") and (funct3 /= "011")) then valu_op <= valu_sub;
-                elsif ((funct6 = "000011") and (funct3 /= "000")) then valu_op <= valu_rsub;
-                elsif ((funct6 = "000100") and (funct3 /= "011")) then valu_op <= valu_minu;
-                elsif ((funct6 = "000101") and (funct3 /= "011")) then valu_op <= valu_min;
-                elsif ((funct6 = "000110") and (funct3 /= "011")) then valu_op <= valu_maxu;
-                elsif ((funct6 = "000111") and (funct3 /= "011")) then valu_op <= valu_max;
+                elsif  (funct6 = "000010") and (funct3 /= "011")  then valu_op <= valu_sub;
+                elsif  (funct6 = "000011") and (funct3 /= "000")  then valu_op <= valu_rsub;
+                elsif  (funct6 = "000100") and (funct3 /= "011")  then valu_op <= valu_minu;
+                elsif  (funct6 = "000101") and (funct3 /= "011")  then valu_op <= valu_min;
+                elsif  (funct6 = "000110") and (funct3 /= "011")  then valu_op <= valu_maxu;
+                elsif  (funct6 = "000111") and (funct3 /= "011")  then valu_op <= valu_max;
                 elsif  (funct6 = "001001")                        then valu_op <= valu_and;
                 elsif  (funct6 = "001010")                        then valu_op <= valu_or;
                 elsif  (funct6 = "001011")                        then valu_op <= valu_xor;
                 elsif  (funct6 = "010000")                        then valu_op <= valu_adc;
                 elsif  (funct6 = "010001")                        then valu_op <= valu_madc;
-                elsif ((funct6 = "010010") and (funct3 /= "011")) then valu_op <= valu_sbc;
-                elsif ((funct6 = "010011") and (funct3 /= "011")) then valu_op <= valu_msbc;
+                elsif  (funct6 = "010010") and (funct3 /= "011")  then valu_op <= valu_sbc;
+                elsif  (funct6 = "010011") and (funct3 /= "011")  then valu_op <= valu_msbc;
                 elsif  (funct6 = "010111")                        then valu_op <= valu_merge;
                 elsif  (funct6 = "011000")                        then valu_op <= valu_seq;
                 elsif  (funct6 = "011001")                        then valu_op <= valu_sne;
-                elsif ((funct6 = "011010") and (funct3 /= "011")) then valu_op <= valu_sltu;
-                elsif ((funct6 = "011011") and (funct3 /= "011")) then valu_op <= valu_slt;
+                elsif  (funct6 = "011010") and (funct3 /= "011")  then valu_op <= valu_sltu;
+                elsif  (funct6 = "011011") and (funct3 /= "011")  then valu_op <= valu_slt;
                 elsif  (funct6 = "011100")                        then valu_op <= valu_sleu;
                 elsif  (funct6 = "011101")                        then valu_op <= valu_sle;
-                elsif ((funct6 = "011110") and (funct3 /= "000")) then valu_op <= valu_sgtu;
-                elsif ((funct6 = "011111") and (funct3 /= "000")) then valu_op <= valu_sgt;
+                elsif  (funct6 = "011110") and (funct3 /= "000")  then valu_op <= valu_sgtu;
+                elsif  (funct6 = "011111") and (funct3 /= "000")  then valu_op <= valu_sgt;
                 elsif  (funct6 = "100101")                        then valu_op <= valu_sll;
                 elsif  (funct6 = "101000")                        then valu_op <= valu_srl;
                 elsif  (funct6 = "101001")                        then valu_op <= valu_sra;
@@ -316,10 +384,10 @@ begin
             -- OPMVV or OPMVX --
             when "010" | "110" =>
                 if (funct6 = "010010") then
-                    if (src1 = "00100") then valu_op <= valu_zext_vf4;
-                    elsif (src1 = "00101") then valu_op <= valu_sext_vf4;
-                    elsif (src1 = "00110") then valu_op <= valu_zext_vf2;
-                    elsif (src1 = "00111") then valu_op <= valu_sext_vf2;
+                    if (vs1 = "00100") then valu_op <= valu_zext_vf4;
+                    elsif (vs1 = "00101") then valu_op <= valu_sext_vf4;
+                    elsif (vs1 = "00110") then valu_op <= valu_zext_vf2;
+                    elsif (vs1 = "00111") then valu_op <= valu_sext_vf2;
                     -- INVALID SOURCE_1 --
                     else
                         valu_op <= valu_invalid;
@@ -345,6 +413,6 @@ begin
             when others => 
                 valu_op <= valu_invalid;
         end case;
-    end;
+    end process;
 
 end neorv32_vcu_rtl;

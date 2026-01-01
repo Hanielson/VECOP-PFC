@@ -31,17 +31,14 @@ end neorv32_valu;
 
 architecture neorv32_valu_rtl of neorv32_valu is
 
-    -- ALU State Machine Signals --
-    type valu_state_t is (VALU_IDLE, VALU_EXEC);
-    signal valu_state : valu_state_t;
-    signal valu_cyc   : std_ulogic_vector(2 downto 0);
+    -- ALU Cycle Indication --
+    signal valu_cyc : std_ulogic_vector(2 downto 0);
     
     -- Internal Vector Operands --
     signal op2_i     : std_ulogic_vector(VLEN-1 downto 0);
     signal op1_i     : std_ulogic_vector(VLEN-1 downto 0);
     signal op0_i     : std_ulogic_vector(VLEN-1 downto 0);
     signal vmask_i   : std_ulogic_vector(VLEN-1 downto 0);
-    signal alu_out_i : std_ulogic_vector((8*VLEN)-1 downto 0);
     signal vsew_i    : std_ulogic_vector(2 downto 0);
 
     -- SUM/SUB Operation Signals --
@@ -149,20 +146,14 @@ begin
     process(clk, rst) begin
         if (rst = '1') then
             valu_cyc   <= "000";
-            valu_state <= VALU_IDLE;
         elsif rising_edge(clk) then
             case alu_op is
                 when valu_waddu | valu_wsubu | valu_wadd | valu_wsub | valu_waddu_2sew | valu_wsubu_2sew | valu_wadd_2sew | valu_wsub_2sew | valu_zext_vf2 | valu_sext_vf2 =>
-                    valu_cyc <= "000" when (valu_cyc = "001") or (valu_state = VALU_IDLE) else std_ulogic_vector(unsigned(valu_cyc) + 1);
+                    valu_cyc <= "000" when (valu_cyc = "001") or (valid = '0') else std_ulogic_vector(unsigned(valu_cyc) + 1);
                 when valu_zext_vf4 | valu_sext_vf4 =>
-                    valu_cyc <= "000" when (valu_cyc = "011") or (valu_state = VALU_IDLE) else std_ulogic_vector(unsigned(valu_cyc) + 1);
+                    valu_cyc <= "000" when (valu_cyc = "011") or (valid = '0') else std_ulogic_vector(unsigned(valu_cyc) + 1);
                 when others =>
-                    valu_cyc <= "000" when (valu_cyc = "111") or (valu_state = VALU_IDLE) else std_ulogic_vector(unsigned(valu_cyc) + 1);
-            end case;
-
-            case valu_state is
-                when VALU_IDLE => valu_state <= VALU_EXEC when (valid = '1') else VALU_IDLE;
-                when VALU_EXEC => valu_state <= VALU_IDLE when (valid = '0') else VALU_EXEC;
+                    valu_cyc <= "000" when (valu_cyc = "111") or (valid = '0') else std_ulogic_vector(unsigned(valu_cyc) + 1);
             end case;
         end if;
     end process;
@@ -270,11 +261,10 @@ begin
         if (rst = '1') then
             vmask_i <= (others => '0');
         elsif rising_edge(clk) then
-            vmask_i <= vmask                 when (valu_state = VALU_IDLE) else 
-                       vmask_i srl (VLEN/8)  when (vsew_i = "000")         else
-                       vmask_i srl (VLEN/16) when (vsew_i = "001")         else
-                       vmask_i srl (VLEN/32) when (vsew_i = "010")         else
-                       (others => '0');
+            vmask_i <= vmask_i srl (VLEN/8)  when ((vsew_i = "000") and (valid = '1')) else
+                       vmask_i srl (VLEN/16) when ((vsew_i = "001") and (valid = '1')) else
+                       vmask_i srl (VLEN/32) when ((vsew_i = "010") and (valid = '1')) else
+                       vmask;
         end if;
     end process;
     --- This logic should be used by instructions like Sum w/ Carry_In, Merge Instructions---
