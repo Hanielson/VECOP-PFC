@@ -46,6 +46,13 @@ begin
         wait for 40 ns;
         RST <= '0';
 
+        -- VSETVLI --> VLMUL = 1 | VSEW = 8 | VTA=VMA=0 | VL=MAXVL 
+        --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
+        VINST <= "0" & "00000000000" & "00000" & "111" & "11111" & "1010111";
+        VINST_VALID <= '1';
+        wait for 20 ns;
+        VINST_VALID <= '0';
+        wait for 80 ns;
         -- VADD --> V2 = V0 + V1
         --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
         VINST <= "000000" & "0" & "00000" & "00001" & "000" & "00010" & "1010111";
@@ -53,7 +60,6 @@ begin
         wait for 20 ns;
         VINST_VALID <= '0';
         wait for 80 ns;
-
         -- VADD --> V5 = V3 + V4
         --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
         VINST <= "000000" & "0" & "00011" & "00100" & "000" & "00101" & "1010111";
@@ -61,7 +67,56 @@ begin
         wait for 20 ns;
         VINST_VALID <= '0';
         wait for 80 ns;
+        -- VSEQ --> V0 = (V2 == V5)
+        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
+        VINST <= "011000" & "0" & "00010" & "00101" & "000" & "00000" & "1010111";
+        VINST_VALID <= '1';
+        wait for 20 ns;
+        VINST_VALID <= '0';
+        wait for 80 ns;
 
+        -- VSETVLI --> VLMUL = 1 | VSEW = 16 | VTA=VMA=0 | VL=MAXVL 
+        --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
+        VINST <= "0" & "00000001000" & "00000" & "111" & "11111" & "1010111";
+        -- VADD --> V2 = V0 + V1
+        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
+        VINST <= "000000" & "0" & "00000" & "00001" & "000" & "00010" & "1010111";
+        VINST_VALID <= '1';
+        wait for 20 ns;
+        VINST_VALID <= '0';
+        wait for 80 ns;
+        -- VADD --> V5 = V3 + V4
+        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
+        VINST <= "000000" & "0" & "00011" & "00100" & "000" & "00101" & "1010111";
+        VINST_VALID <= '1';
+        wait for 20 ns;
+        VINST_VALID <= '0';
+        wait for 80 ns;
+        -- VSEQ --> V0 = (V2 == V5)
+        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
+        VINST <= "011000" & "0" & "00010" & "00101" & "000" & "00000" & "1010111";
+        VINST_VALID <= '1';
+        wait for 20 ns;
+        VINST_VALID <= '0';
+        wait for 80 ns;
+
+        -- VSETVLI --> VLMUL = 1 | VSEW = 32 | VTA=VMA=0 | VL=MAXVL 
+        --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
+        VINST <= "0" & "00000010000" & "00000" & "111" & "11111" & "1010111";
+        -- VADD --> V2 = V0 + V1
+        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
+        VINST <= "000000" & "0" & "00000" & "00001" & "000" & "00010" & "1010111";
+        VINST_VALID <= '1';
+        wait for 20 ns;
+        VINST_VALID <= '0';
+        wait for 80 ns;
+        -- VADD --> V5 = V3 + V4
+        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
+        VINST <= "000000" & "0" & "00011" & "00100" & "000" & "00101" & "1010111";
+        VINST_VALID <= '1';
+        wait for 20 ns;
+        VINST_VALID <= '0';
+        wait for 80 ns;
         -- VSEQ --> V0 = (V2 == V5)
         --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
         VINST <= "011000" & "0" & "00010" & "00101" & "000" & "00000" & "1010111";
