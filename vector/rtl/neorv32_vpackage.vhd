@@ -73,10 +73,9 @@ package neorv32_vpackage is
     ----------------------
     --- Vector Opcodes ---
     ----------------------
-    constant vop_load   : std_ulogic_vector(6 downto 0) := "0000111";
-    constant vop_store  : std_ulogic_vector(6 downto 0) := "0100111";
-    constant vop_arith  : std_ulogic_vector(6 downto 0) := "1010111";
-    constant vop_config : std_ulogic_vector(6 downto 0) := "1010111";
+    constant vop_load      : std_ulogic_vector(6 downto 0) := "0000111";
+    constant vop_store     : std_ulogic_vector(6 downto 0) := "0100111";
+    constant vop_arith_cfg : std_ulogic_vector(6 downto 0) := "1010111";
 
     ----------------------------
     --- V-ALU Operations IDs ---

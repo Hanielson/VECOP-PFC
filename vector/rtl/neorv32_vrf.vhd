@@ -2,6 +2,9 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use ieee.math_real.all;
+use ieee.std_logic_textio.all;
+
+use std.textio.all;
 
 use work.neorv32_vpackage.all;
 
@@ -40,8 +43,27 @@ architecture neorv32_vrf_rtl of neorv32_vrf is
     --       2R+2W at the same clock cycle (Dual Ported RAM)                                                    --
     type vector_t   is array ((VLEN/8)-1 downto 0) of std_ulogic_vector(7 downto 0);
     type vregfile_t is array ((2**VREF_ADDR_WIDTH)-1 downto 0) of vector_t;
-    signal vregfile_0 : vregfile_t := (others => (others => x"1F"));
-    signal vregfile_1 : vregfile_t := (others => (others => x"1F"));
+    impure function init_ram(file_name: string) return vregfile_t is
+        file     init_file   : text;
+        variable line_buffer : line;
+        variable temp_bv     : std_ulogic_vector(VLEN-1 downto 0);
+        variable ram_content : vregfile_t := (others => (others => (others => '0')));
+    begin
+        file_open(init_file, file_name, read_mode);
+        for ii in 0 to (2**VREF_ADDR_WIDTH)-1 loop
+            if not endfile(init_file) then
+                readline(init_file, line_buffer);
+                hread(line_buffer, temp_bv);
+                for jj in 0 to (VLEN/8)-1 loop
+                    ram_content(ii)(jj) := temp_bv(8*jj+7 downto 8*jj);
+                end loop;
+            end if;
+        end loop;
+        file_close(init_file);
+        return ram_content;
+    end function;
+    signal vregfile_0 : vregfile_t := init_ram("D:/UFMG/TCC/projeto/neorv32-main/rtl/vector/scripts/vrf_contents.txt");
+    signal vregfile_1 : vregfile_t := init_ram("D:/UFMG/TCC/projeto/neorv32-main/rtl/vector/scripts/vrf_contents.txt");
 
     attribute ramstyle : string;
     attribute ramstyle of vregfile_0 : signal is "M9K";

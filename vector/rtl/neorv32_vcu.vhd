@@ -49,7 +49,7 @@ end neorv32_vcu;
 
 architecture neorv32_vcu_rtl of neorv32_vcu is
 
-    type ctrl_state_t is (IDLE, DECODE, CSR_WR, ALU_START, ALU_EXEC, INVALID);
+    type ctrl_state_t is (IDLE, DECODE, VCONFIG, ALU_START, ALU_EXEC, INVALID);
     signal state : ctrl_state_t;
 
     signal vinst_i : std_ulogic_vector(XLEN-1 downto 0);
@@ -142,26 +142,34 @@ begin
                     
                     -- Operation State --
                     opcode := vinst_i(6 downto 0);
-                    if (opcode = vop_load)   then
-                        state <= IDLE;
-                    elsif (opcode = vop_store)  then
-                        state <= IDLE;
-                    elsif (opcode = vop_arith)  then
-                        if (valu_op = valu_invalid) then 
+                    case opcode is
+                        -- Load Instruction --
+                        when vop_load =>
+                            state <= IDLE;
+
+                        -- Store Instruction --
+                        when vop_store =>
+                            state <= IDLE;
+
+                        -- Airthmetic or Configuration Instruction --
+                        when vop_arith_cfg =>
+                            if (funct3 = "111") then
+                                state <= VCONFIG;
+                            elsif (valu_op = valu_invalid) then
+                                state <= INVALID;
+                            else
+                                state <= ALU_START;
+                            end if;
+
+                        -- Unsupported Opcode --
+                        when others =>
                             state <= INVALID;
-                        else
-                            state <= ALU_START;
-                        end if;
-                    elsif (opcode = vop_config) then
-                        state <= CSR_WR;
-                    else                             
-                        state <= INVALID;
-                    end if;
+                    end case;
                 
                 -- CSR Write State --
-                when CSR_WR =>
+                when VCONFIG =>
                     state <= IDLE;
-
+                    
                 -- ALU Startup/Execution State --
                 when ALU_START | ALU_EXEC =>
                     case valu_op is
@@ -219,8 +227,8 @@ begin
     --- Output Generation Logic --
     ------------------------------
     process(all)
-        variable vs2        : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
-        variable vs1        : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        variable vs2_i      : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        variable vs1_i      : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
         variable vd         : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
         variable valu_valid : std_ulogic;
         variable byte_en    : std_ulogic_vector((VLEN/8)-1 downto 0);
@@ -230,6 +238,12 @@ begin
         variable sel_op1    : std_ulogic;
         variable sel_imm    : std_ulogic;
         variable scalar     : std_ulogic_vector(XLEN-1 downto 0);
+
+        variable vtype_i : std_ulogic_vector(XLEN-1 downto 0);
+        variable vtype_n : std_ulogic_vector(XLEN-1 downto 0);
+        variable avl     : std_ulogic_vector(XLEN-1 downto 0);
+        variable vl_n    : std_ulogic_vector(XLEN-1 downto 0);
+        variable vlmax   : unsigned(XLEN-1 downto 0);
     begin
         case state is
             -- Waiting for Valid Instruction --
@@ -253,13 +267,74 @@ begin
                 cp_result <= (others => '0');
                 cp_valid  <= '0';
 
+            -- V-CONFIG State --
+            when VCONFIG =>
+                case vinst_i(31 downto 30) is
+                    when "10" =>
+                        vtype_i := scal2;
+                        if    (vs1 /= "00000") then avl := scal1;
+                        elsif (dest = "00000") then avl := (others => '1');
+                        else                        avl := vl;     
+                        end if;
+
+                    when "11" =>
+                        vtype_i := std_ulogic_vector(resize(unsigned(vinst_i(29 downto 20)), vtype_i'length));
+                        avl     := std_ulogic_vector(resize(unsigned(vinst_i(19 downto 15)), avl'length));
+
+                    when others =>
+                        vtype_i := std_ulogic_vector(resize(unsigned(vinst_i(30 downto 20)), vtype_i'length));
+                        if    (vs1 /= "00000") then avl := scal1;
+                        elsif (dest = "00000") then avl := (others => '1');
+                        else                        avl := vl;     
+                        end if;
+                end case;
+
+                -- Check for any invalid field in proposed vtype value --
+                if (vtype_i(XLEN-1) = '1') or (vtype_i(XLEN-2 downto 8) /= std_ulogic_vector(to_unsigned(0, XLEN-9))) or (vtype_i(5 downto 3) = "011") or (vtype_i(5) = '1') or (vtype_i(2 downto 0) = "100") then
+                    vtype_n := (XLEN-1 => '1', others => '0');
+                    vl_n    := (others => '0');
+                else
+                    vtype_n := vtype_i;
+
+                    -- Calculates VLMAX for the proposed VSEW configuration --
+                    if    (vtype_i(5 downto 3) = "000") then vlmax := shift_right(to_unsigned(VLEN, vlmax'length), 3);
+                    elsif (vtype_i(5 downto 3) = "001") then vlmax := shift_right(to_unsigned(VLEN, vlmax'length), 4);
+                    elsif (vtype_i(5 downto 3) = "010") then vlmax := shift_right(to_unsigned(VLEN, vlmax'length), 5);
+                    else                                     vlmax := to_unsigned(0, vlmax'length);
+                    end if;
+
+                    -- Defines new vl value based on AVL and VLMAX, stripmining if necessary --
+                    if (unsigned(avl) > vlmax) then vl_n := std_ulogic_vector(resize(vlmax, vl_n'length));
+                    else                            vl_n := avl;
+                    end if;
+                end if;
+
+                vctrl <= (
+                    -- VI-Queue Control --
+                    viq_nxt => '0',
+                    -- CSR Control --
+                    csr_wen => "110", csr_vtype_n => vtype_n, csr_vl_n => vl_n, csr_vstart_n => (others => '0'),
+                    -- V-SLD Control --
+                    sld_en => '0', sld_shift => '0', sld_up => '0',
+                    -- VRF Control --
+                    vrf_vs2 => (others => '0'), vrf_vs1 => (others => '0'), vrf_vd => (others => '0'), vrf_ben => (others => '0'), vrf_wr_sel => (others => '0'),
+                    -- O-SEL Control --
+                    osel_imm => (others => '0'), osel_sel_op2 => '0', osel_sel_op1 => '0', osel_sel_imm => '0', osel_scalar => (others => '0'),
+                    -- V-ALU Control --
+                    valu_op => (others => '0'), valu_valid => '0',
+                    -- V-LSU Control --
+                    vlsu_wen => '0', vlsu_addr => (others => '0'), vlsu_strd => (others => '0'), vlsu_mode => '0', vlsu_ordrd => '0', vlsu_vme => '0', vlsu_width => (others => '0'), vlsu_start => '0'
+                );
+                cp_result <= vl_n;
+                cp_valid  <= '1';
+
             -- ALU Execution State --
             when ALU_START | ALU_EXEC =>
                 -- Operation Independent Signals --
-                vs2     := src2;
-                vs1     := src1;
+                vs2_i   := src2;
+                vs1_i   := src1;
                 vd      := dest_ff;
-                imm     := src1;
+                imm     := vs1;
                 sel_op2 := '0';
                 scalar  := scal1;
                 wr_sel  := "00";
@@ -307,7 +382,7 @@ begin
                     -- V-SLD Control --
                     sld_en => '0', sld_shift => '0', sld_up => '0',
                     -- VRF Control --
-                    vrf_vs2 => vs2, vrf_vs1 => vs1, vrf_vd => vd, vrf_ben => byte_en, vrf_wr_sel => wr_sel,
+                    vrf_vs2 => vs2_i, vrf_vs1 => vs1_i, vrf_vd => vd, vrf_ben => byte_en, vrf_wr_sel => wr_sel,
                     -- O-SEL Control --
                     osel_imm => imm, osel_sel_op2 => sel_op2, osel_sel_op1 => sel_op1, osel_sel_imm => sel_imm, osel_scalar => scalar,
                     -- V-ALU Control --
