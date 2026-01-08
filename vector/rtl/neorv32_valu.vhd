@@ -42,10 +42,11 @@ architecture neorv32_valu_rtl of neorv32_valu is
     signal vsew_i    : std_ulogic_vector(2 downto 0);
 
     -- SUM/SUB Operation Signals --
-    signal vcarry    : std_ulogic_vector((VLEN/8) downto 0);
-    signal vcarry_in : std_ulogic_vector((VLEN/8) downto 0);
-    signal add_temp  : std_ulogic_vector((VLEN-1)+(VLEN/8) downto 0);
-    signal add_final : std_ulogic_vector(VLEN-1 downto 0);
+    signal vcarry     : std_ulogic_vector((VLEN/8) downto 0);
+    signal vcarry_in  : std_ulogic_vector((VLEN/8) downto 0);
+    signal vcarry_out : std_ulogic_vector(VLEN-1 downto 0);
+    signal add_temp   : std_ulogic_vector((VLEN-1)+(VLEN/8) downto 0);
+    signal add_final  : std_ulogic_vector(VLEN-1 downto 0);
 
     -- INT-EXT Operation Signals --
     signal ext16 : std_ulogic_vector(VLEN-1 downto 0);
@@ -105,33 +106,44 @@ architecture neorv32_valu_rtl of neorv32_valu is
     end function narrow_map;
 
     -- COMPARISON OPERATION FUNCTION --
-    function compare_map(idx  : integer;
-                         sew  : integer;
-                         op   : std_ulogic_vector;
-                         op_a : std_ulogic_vector;
-                         op_b : std_ulogic_vector) return std_ulogic is
-        variable comp   : std_ulogic := '0';
-        variable result : std_ulogic := '0';
-        variable a      : std_ulogic_vector(sew-1 downto 0) := (others => '0');
-        variable b      : std_ulogic_vector(sew-1 downto 0) := (others => '0');
+    function compare_map(idx     : integer;
+                         sew     : integer;
+                         alu_op  : std_ulogic_vector;
+                         op_a    : std_ulogic_vector;
+                         op_b    : std_ulogic_vector;
+                         sub_out : std_ulogic_vector;
+                         carry   : std_ulogic_vector) return std_ulogic is
+        variable comp                     : std_ulogic := '0';
+        variable result                   : std_ulogic := '0';
+        variable elem                     : std_ulogic_vector(sew-1 downto 0) := (others => '0');
+        variable borrow, ovflw, zero, neg : std_ulogic;
+
+        variable ELEM_MSB, ELEM_LSB : natural;
+        variable OP_MSB : natural;
     begin
+        ELEM_MSB := sew*idx+(sew-1);
+        ELEM_LSB := sew*idx;
+
         if (idx < (VLEN / sew)) then
-            a := op_a(sew*idx+(sew-1) downto sew*idx);
-            b := op_b(sew*idx+(sew-1) downto sew*idx);
-            case op is
-                when valu_seq                           => comp := '1' when (a = b)                      else '0';
-                when valu_sne                           => comp := '1' when (not (a = b))                else '0';
-                when valu_sltu | valu_minu | valu_maxu  => comp := '1' when (unsigned(a) < unsigned(b))  else '0';
-                when valu_slt  | valu_min  | valu_max   => comp := '1' when (signed(a) < signed(b))      else '0';
-                when valu_sleu                          => comp := '1' when (unsigned(a) <= unsigned(b)) else '0';
-                when valu_sle                           => comp := '1' when (signed(a) <= signed(b))     else '0';
-                when valu_sgtu                          => comp := '1' when (unsigned(a) > unsigned(b))  else '0';
-                when valu_sgt                           => comp := '1' when (signed(a) > signed(b))      else '0';
-                when valu_sgeu                          => comp := '1' when (unsigned(a) >= unsigned(b)) else '0';
-                when valu_sge                           => comp := '1' when (signed(a) >= signed(b))     else '0';
-                when others                             => comp := '0';
+            elem   := sub_out(ELEM_MSB downto ELEM_LSB);
+            borrow := carry(idx);
+            ovflw  := (op_a(ELEM_MSB) xor op_b(ELEM_MSB)) and (elem(elem'left) xor op_a(ELEM_MSB));
+            zero   := not (or elem);
+            neg    := elem(elem'left);
+
+            case alu_op is
+                when valu_seq                           => result := '1' when (zero = '1')                                    else '0';
+                when valu_sne                           => result := '0' when (zero = '1')                                    else '1';
+                when valu_sltu | valu_minu | valu_maxu  => result := '1' when (borrow = '1')                                  else '0';
+                when valu_sgeu                          => result := '0' when (borrow = '1')                                  else '1';
+                when valu_slt  | valu_min  | valu_max   => result := '1' when (neg = '1') xor (ovflw = '1')                   else '0';
+                when valu_sge                           => result := '0' when (neg = '1') xor (ovflw = '1')                   else '1';
+                when valu_sgt                           => result := '0' when ((neg = '1') xor (ovflw = '1')) or (zero = '1') else '1';
+                when valu_sle                           => result := '1' when ((neg = '1') xor (ovflw = '1')) or (zero = '1') else '0';
+                when valu_sgtu                          => result := '1' when (borrow = '0') and (zero = '0')                 else '0';
+                when valu_sleu                          => result := '0' when (borrow = '0') and (zero = '0')                 else '1';
+                when others                             => result := '0';
             end case;
-            result := comp;
         else 
             result := '0';
         end if;
@@ -283,6 +295,43 @@ begin
         end process;
     end generate CARRY_IN_GENERATE;
 
+    -- Logic for Carry-Out Generation in Mask Format --
+    CARRY_OUT_GENERATE: for ii in 0 to (VLEN - 1) generate
+        CARRY_OUT_A: if (ii < (VLEN / 32)) and (ii < (VLEN / 16)) and (ii < (VLEN / 8)) generate
+            process(all) begin
+                case vsew_i is
+                    when "000"  => vcarry_out(ii) <= add_temp(9*ii+8);
+                    when "001"  => vcarry_out(ii) <= add_temp(18*ii+17);
+                    when "010"  => vcarry_out(ii) <= add_temp(36*ii+35);
+                    when others => vcarry_out(ii) <= '0';
+                end case;
+            end process;
+        end generate CARRY_OUT_A;
+
+        CARRY_OUT_B: if (ii >= (VLEN / 32)) and (ii < (VLEN / 16)) and (ii < (VLEN / 8)) generate
+            process(all) begin
+                case vsew_i is
+                    when "000"  => vcarry_out(ii) <= add_temp(9*ii+8);
+                    when "001"  => vcarry_out(ii) <= add_temp(18*ii+17);
+                    when others => vcarry_out(ii) <= '0';
+                end case;
+            end process;
+        end generate CARRY_OUT_B;
+
+        CARRY_OUT_C: if (ii >= (VLEN / 32)) and (ii >= (VLEN / 16)) and (ii < (VLEN / 8)) generate
+            process(all) begin
+                case vsew_i is
+                    when "000"  => vcarry_out(ii) <= add_temp(9*ii+8);
+                    when others => vcarry_out(ii) <= '0';
+                end case;
+            end process;
+        end generate CARRY_OUT_C;
+
+        CARRY_OUT_D: if (ii >= (VLEN / 32)) and (ii >= (VLEN / 16)) and (ii >= (VLEN / 8)) generate
+            vcarry_out(ii) <= '0';
+        end generate CARRY_OUT_D;
+    end generate CARRY_OUT_GENERATE;
+
     ------------------------------------------------
     -- SUM logic for vadd/vsub/vrsub instructions --
     ------------------------------------------------
@@ -319,7 +368,9 @@ begin
             case alu_op is
                 when valu_add | valu_waddu_2sew | valu_wadd_2sew | valu_waddu | valu_wadd | valu_adc | valu_madc =>
                     add_temp(9*ii+8 downto 9*ii) <= std_ulogic_vector(resize(unsigned(op_a(8*ii+7 downto 8*ii)), 9) + resize(unsigned(op_b(8*ii+7 downto 8*ii)), 9) + vcarry(ii));
-                when valu_sub | valu_wsubu_2sew | valu_wsub_2sew | valu_wsubu | valu_wsub | valu_sbc | valu_msbc | valu_rsub =>
+                when valu_sub  | valu_wsubu_2sew | valu_wsub_2sew | valu_wsubu | valu_wsub | valu_sbc  | valu_msbc | valu_rsub | valu_seq | 
+                     valu_sne  | valu_sltu       | valu_slt       | valu_sleu  | valu_sle  | valu_sgtu | valu_sgt  | valu_sgeu | valu_sge |
+                     valu_minu | valu_min        | valu_maxu      | valu_max =>
                     add_temp(9*ii+8 downto 9*ii) <= std_ulogic_vector(resize(unsigned(op_a(8*ii+7 downto 8*ii)), 9) - resize(unsigned(op_b(8*ii+7 downto 8*ii)), 9) - vcarry(ii));
                 when others =>
                     add_temp(9*ii+8 downto 9*ii) <= (others => '0');
@@ -461,9 +512,9 @@ begin
     COMP_DATAPATH: for idx in 0 to (VLEN - 1) generate
         process(all) begin
             case vsew_i is
-                when "000"  => comp_out(idx) <= compare_map(idx, 8,  alu_op, op2_i, op1_i);
-                when "001"  => comp_out(idx) <= compare_map(idx, 16, alu_op, op2_i, op1_i);
-                when "010"  => comp_out(idx) <= compare_map(idx, 32, alu_op, op2_i, op1_i);
+                when "000"  => comp_out(idx) <= compare_map(idx, 8,  alu_op, op2_i, op1_i, add_final, vcarry_out);
+                when "001"  => comp_out(idx) <= compare_map(idx, 16, alu_op, op2_i, op1_i, add_final, vcarry_out);
+                when "010"  => comp_out(idx) <= compare_map(idx, 32, alu_op, op2_i, op1_i, add_final, vcarry_out);
                 when others => comp_out(idx) <= '0';
             end case;
         end process;
