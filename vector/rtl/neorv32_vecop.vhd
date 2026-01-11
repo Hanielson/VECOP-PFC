@@ -39,7 +39,7 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
             vta         : in std_ulogic;
             vsew        : in std_ulogic_vector(2 downto 0);
             vlmul       : in std_ulogic_vector(2 downto 0);
-            sld_valid   : in std_ulogic;
+            sld_done    : in std_ulogic;
             lsu_done    : in std_ulogic;
             memtrp_id   : in std_ulogic_vector(1 downto 0);
             memtrp_addr : in std_ulogic_vector(XLEN-1 downto 0);
@@ -79,6 +79,23 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
         );
     end component neorv32_valu;
 
+    component neorv32_vsld is
+        port(
+            clk       : in std_ulogic;
+            rst       : in std_ulogic;
+            sld_vs2   : in std_ulogic_vector(VLEN-1 downto 0);
+            sld_vs1   : in std_ulogic_vector(VLEN-1 downto 0);
+            vsew      : in std_ulogic_vector(2 downto 0);
+            sld_en    : in std_ulogic;
+            sld_up    : in std_ulogic;
+            sld_last  : in std_ulogic;
+            sld_elem  : in std_ulogic_vector((VLEN/8)-1 downto 0);
+            sld_out   : out std_ulogic_vector(VLEN-1 downto 0);
+            sld_be    : out std_ulogic_vector((VLEN/8)-1 downto 0);
+            sld_done  : out std_ulogic
+        );
+    end component neorv32_vsld;
+
     ---------------------------
     --- Signal Declarations ---
     ---------------------------
@@ -96,7 +113,8 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
     signal vq_full         : std_ulogic;
     signal vq_scal2        : std_ulogic_vector(XLEN-1 downto 0);
     signal vq_scal1        : std_ulogic_vector(XLEN-1 downto 0);
-    signal sld_valid       : std_ulogic;
+    signal sld_done        : std_ulogic;
+    signal sld_be          : std_ulogic_vector((VLEN/8)-1 downto 0);
     signal lsu_done        : std_ulogic;
     signal lsu_memtrp_id   : std_ulogic_vector(1 downto 0);
     signal lsu_memtrp_addr : std_ulogic_vector(XLEN-1 downto 0);
@@ -149,7 +167,8 @@ begin
         vta         => vta,
         vsew        => vsew,
         vlmul       => vlmul,
-        sld_valid   => sld_valid,
+        sld_done    => sld_done,
+        sld_be      => sld_be,
         lsu_done    => lsu_done,
         memtrp_id   => lsu_memtrp_id,
         memtrp_addr => lsu_memtrp_addr,
@@ -182,6 +201,21 @@ begin
         vmask   => vmask,
         vsew    => vsew,
         alu_out => alu_out
+    );
+
+    vsld: entity work.neorv32_vsld port map (
+        clk       => clk,
+        rst       => rst,
+        sld_vs2   => vs2_out,
+        sld_vs1   => vs1_out,
+        vsew      => vsew,
+        sld_en    => vctrl.sld_en,
+        sld_up    => vctrl.sld_up,
+        sld_last  => vctrl.sld_last,
+        sld_elem  => vctrl.sld_elem,
+        sld_out   => sld_out,
+        sld_be    => sld_be,
+        sld_done  => sld_done
     );
 
     ------------------------------------

@@ -62,8 +62,8 @@ architecture neorv32_vrf_rtl of neorv32_vrf is
         file_close(init_file);
         return ram_content;
     end function;
-    signal vregfile_0 : vregfile_t := init_ram("D:/UFMG/TCC/projeto/neorv32-main/rtl/vector/scripts/vrf_contents.txt");
-    signal vregfile_1 : vregfile_t := init_ram("D:/UFMG/TCC/projeto/neorv32-main/rtl/vector/scripts/vrf_contents.txt");
+    signal vregfile_0 : vregfile_t := init_ram("D:/UFMG/TCC/projeto/neorv32-main/rtl/vector/scripts/vrf_contents_simple.txt");
+    signal vregfile_1 : vregfile_t := init_ram("D:/UFMG/TCC/projeto/neorv32-main/rtl/vector/scripts/vrf_contents_simple.txt");
 
     attribute ramstyle : string;
     attribute ramstyle of vregfile_0 : signal is "M9K";

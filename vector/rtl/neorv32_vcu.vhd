@@ -31,7 +31,8 @@ entity neorv32_vcu is
         vlmul       : in std_ulogic_vector(2 downto 0);
 
         -- V-SLD Signals --
-        sld_valid   : in std_ulogic;
+        sld_done    : in std_ulogic;
+        sld_be      : in std_ulogic_vector((VLEN/8)-1 downto 0);
 
         -- V-LSU Signals --
         lsu_done    : in std_ulogic;
@@ -49,27 +50,30 @@ end neorv32_vcu;
 
 architecture neorv32_vcu_rtl of neorv32_vcu is
 
-    type ctrl_state_t is (IDLE, DECODE, VCONFIG, ALU_START, ALU_EXEC, INVALID);
+    type ctrl_state_t is (IDLE, DECODE, VCONFIG, ALU_START, ALU_EXEC, SLIDE_START, SLIDE_EXEC, INVALID);
     signal state : ctrl_state_t;
 
     signal vinst_i : std_ulogic_vector(XLEN-1 downto 0);
-    signal vlmul_i : std_ulogic_vector(3 downto 0);
+    signal vlmul_i : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
 
-    signal dest    : std_ulogic_vector(4 downto 0);
-    signal dest_ff : std_ulogic_vector(4 downto 0);
-    signal src1    : std_ulogic_vector(4 downto 0);
-    signal src2    : std_ulogic_vector(4 downto 0);
+    signal reg_offset  : unsigned(VREF_ADDR_WIDTH-1 downto 0);
+    signal elem_offset : unsigned(4 downto 0);
+
+    signal dest    : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+    signal dest_ff : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+    signal src1    : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+    signal src2    : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
 
     signal funct3 : std_ulogic_vector(2 downto 0);
-    signal vs1    : std_ulogic_vector(4 downto 0);
-    signal vs2    : std_ulogic_vector(4 downto 0);
+    signal vs1    : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+    signal vs2    : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
     signal vm     : std_ulogic;
     signal funct6 : std_ulogic_vector(5 downto 0);
 
     signal valu_op : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
 
     signal cyc_count : std_ulogic_vector(2 downto 0);
-    signal mul_count : std_ulogic_vector(3 downto 0);
+    signal mul_count : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
 
 begin
 
@@ -78,10 +82,10 @@ begin
     ----------------------
     process(all) begin
         case vlmul is
-            when "001"  => vlmul_i <= "0010";
-            when "010"  => vlmul_i <= "0100";
-            when "011"  => vlmul_i <= "1000";
-            when others => vlmul_i <= "0001";
+            when "001"  => vlmul_i <= "00010";
+            when "010"  => vlmul_i <= "00100";
+            when "011"  => vlmul_i <= "01000";
+            when others => vlmul_i <= "00001";
         end case;
     end process;
 
@@ -100,8 +104,11 @@ begin
     --- Next-State Generation / Instruction Load / Internal Counters ---
     --------------------------------------------------------------------
     process(clk, rst)
-        variable opcode  : std_ulogic_vector(6 downto 0);
-        variable max_cyc : std_ulogic_vector(2 downto 0);
+        variable opcode      : std_ulogic_vector(6 downto 0);
+        variable max_cyc     : std_ulogic_vector(2 downto 0);
+        variable offset      : std_ulogic_vector(XLEN-1 downto 0);
+        variable src2_offset : unsigned(VREF_ADDR_WIDTH-1 downto 0);
+        variable dest_offset : unsigned(VREF_ADDR_WIDTH-1 downto 0);
     begin
         if (rst = '1') then
             cyc_count <= (others => '0');
@@ -133,12 +140,48 @@ begin
 
                 -- Instruction Decode Stage --
                 when DECODE =>
+                    --------------------------------------
                     -- Instruction Operands/Destination --
+                    --------------------------------------
                     -- NOTE: we store src2/src1 in registers to operate on them during multi-cycle operations, --
                     --       however the original values are preserved in vs2/vs1 signals for ALU op decoding  --
-                    dest   <= vinst_i(11 downto 7);
-                    src1   <= vinst_i(19 downto 15);
-                    src2   <= vinst_i(24 downto 20);
+
+                    if    (funct3 = "100") then offset := scal1;
+                    elsif (funct3 = "011") then offset := std_ulogic_vector(resize(unsigned(vinst_i(19 downto 15)), XLEN));
+                    else                        offset := (others => '0');
+                    end if;
+                    case vsew is
+                        when "000" =>
+                            reg_offset  <= resize(unsigned(offset(XLEN-1 downto 5)), VREF_ADDR_WIDTH);
+                            elem_offset <= resize(unsigned(offset(4 downto 0)), 5);
+                        when "001" =>
+                            reg_offset  <= resize(unsigned(offset(XLEN-1 downto 4)), VREF_ADDR_WIDTH);
+                            elem_offset <= resize(unsigned(offset(3 downto 0)), 5);
+                        when "010" =>
+                            reg_offset  <= resize(unsigned(offset(XLEN-1 downto 3)), VREF_ADDR_WIDTH);
+                            elem_offset <= resize(unsigned(offset(2 downto 0)), 5);
+                        when others =>
+                            reg_offset  <= (others => '0');
+                            elem_offset <= (others => '0');
+                    end case;
+                    
+                    case valu_op is
+                        when valu_sldup =>
+                            dest_offset := reg_offset;
+                            src2_offset := (others => '0');
+                            
+                        when valu_slddn =>
+                            dest_offset := (others => '0');
+                            src2_offset := reg_offset;
+                        
+                        when others =>
+                            dest_offset := (others => '0');
+                            src2_offset := (others => '0');
+                    end case;
+
+                    dest <= std_ulogic_vector(resize(unsigned(vinst_i(11 downto 7)), VREF_ADDR_WIDTH) + dest_offset);
+                    src1 <= vinst_i(19 downto 15);
+                    src2 <= std_ulogic_vector(resize(unsigned(vinst_i(24 downto 20)), VREF_ADDR_WIDTH) + src2_offset);
                     
                     -- Operation State --
                     opcode := vinst_i(6 downto 0);
@@ -157,6 +200,13 @@ begin
                                 state <= VCONFIG;
                             elsif (valu_op = valu_invalid) then
                                 state <= INVALID;
+                            elsif (valu_op = valu_sldup) or (valu_op = valu_slddn) or (valu_op = valu_sld1up) or (valu_op = valu_sld1dn) then
+                                -- TODO: update this check for synthesis --
+                                if ((unsigned(reg_offset) + 1) > unsigned(vlmul_i)) then
+                                    state <= IDLE;
+                                else
+                                    state <= SLIDE_START;
+                                end if;
                             else
                                 state <= ALU_START;
                             end if;
@@ -211,6 +261,24 @@ begin
 
                     -- Delays Destination in 1 cycle because of Read delay --
                     dest_ff <= dest;
+
+                -- SLIDE Startup/Execution State --
+                when SLIDE_START | SLIDE_EXEC =>
+                    -- SRC2 already needs to be updated on SLIDE_START due to READ_DELAY --
+                    -- DEST should only be updated when SLD operation is done            --
+                    if (state = SLIDE_START) or (sld_done = '1') then
+                        if (sld_done = '1') then
+                            dest      <= std_ulogic_vector(unsigned(dest) + 1);
+                        end if;
+                        src2      <= std_ulogic_vector(unsigned(src2) + 1);
+                        mul_count <= std_ulogic_vector(unsigned(mul_count) + 1);
+                    end if;
+
+                    if (mul_count = vlmul_i) and (sld_done = '1') then
+                        state <= IDLE;
+                    else
+                        state <= SLIDE_EXEC;
+                    end if;
                     
                 -- Invalid Instruction State --
                 -- TODO: for now we just return to IDLE, but vill needs to be set... --
@@ -231,13 +299,20 @@ begin
         variable vs1_i      : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
         variable vd         : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
         variable valu_valid : std_ulogic;
+        variable ben_i      : std_ulogic_vector((VLEN/8)-1 downto 0);
         variable byte_en    : std_ulogic_vector((VLEN/8)-1 downto 0);
+        variable mask_i     : std_ulogic_vector((VLEN/8)-1 downto 0);
         variable wr_sel     : std_ulogic_vector(1 downto 0);
         variable imm        : std_ulogic_vector(4 downto 0);
         variable sel_op2    : std_ulogic;
         variable sel_op1    : std_ulogic;
         variable sel_imm    : std_ulogic;
         variable scalar     : std_ulogic_vector(XLEN-1 downto 0);
+
+        variable vsld_en   : std_ulogic;
+        variable vsld_last : std_ulogic;
+        variable vsld_up   : std_ulogic;
+        variable vsld_elem : std_ulogic_vector(4 downto 0);
 
         variable vtype_i : std_ulogic_vector(XLEN-1 downto 0);
         variable vtype_n : std_ulogic_vector(XLEN-1 downto 0);
@@ -254,7 +329,7 @@ begin
                     -- CSR Control --
                     csr_wen => (others => '0'), csr_vtype_n  => (others => '0'), csr_vl_n => (others => '0'), csr_vstart_n => (others => '0'),
                     -- V-SLD Control --
-                    sld_en => '0', sld_shift => '0', sld_up => '0',
+                    sld_en => '0', sld_elem => (others => '0'), sld_up => '0', sld_last => '0',
                     -- VRF Control --
                     vrf_vs2 => (others => '0'), vrf_vs1 => (others => '0'), vrf_vd => (others => '0'), vrf_ben => (others => '0'), vrf_wr_sel => (others => '0'),
                     -- O-SEL Control --
@@ -315,7 +390,7 @@ begin
                     -- CSR Control --
                     csr_wen => "110", csr_vtype_n => vtype_n, csr_vl_n => vl_n, csr_vstart_n => (others => '0'),
                     -- V-SLD Control --
-                    sld_en => '0', sld_shift => '0', sld_up => '0',
+                    sld_en => '0', sld_elem => (others => '0'), sld_up => '0', sld_last => '0',
                     -- VRF Control --
                     vrf_vs2 => (others => '0'), vrf_vs1 => (others => '0'), vrf_vd => (others => '0'), vrf_ben => (others => '0'), vrf_wr_sel => (others => '0'),
                     -- O-SEL Control --
@@ -342,28 +417,26 @@ begin
                 -- Operation/Cycle Dependent Signals --
                 if (state = ALU_START) then
                     valu_valid := '0';
-                    byte_en := (others => '0');
+                    ben_i      := (others => '0');
                 else
                     valu_valid := '1';
-                    if (vm = '1') then
-                        -- TODO: MASKING LOGIC NEEDS TO BE IMPLEMENTED --
-                        byte_en := x"FFFFFFFF";
-                    else
-                        case valu_op is
-                            -- Narrowing Operations --
-                            when valu_nsrl | valu_nsra =>
-                                if (cyc_count(0) = '1') then
-                                    byte_en := x"FFFF0000";
-                                else
-                                    byte_en := x"0000FFFF";
-                                end if;
+                    case valu_op is
+                        -- Narrowing Operations --
+                        when valu_nsrl | valu_nsra =>
+                            if (cyc_count(0) = '1') then
+                                ben_i := (ben_i'length-1 downto (ben_i'length/2) => '1', others => '0');
+                            else
+                                ben_i := ((ben_i'length/2)-1 downto 0 => '1', others => '0');
+                            end if;
 
-                            -- Other Operation Types --
-                            when others =>
-                                byte_en := x"FFFFFFFF";
-                        end case;
-                    end if;
+                        -- Other Operation Types --
+                        when others =>
+                            ben_i      := (others => '1');
+                    end case;
                 end if;
+                -- TODO: implement masking using below variable
+                mask_i  := (others => '1');
+                byte_en := ben_i and mask_i;
 
                 case funct3 is
                     -- Immediate --
@@ -380,13 +453,76 @@ begin
                     -- CSR Control --
                     csr_wen => (others => '0'), csr_vtype_n  => (others => '0'), csr_vl_n => (others => '0'), csr_vstart_n => (others => '0'),
                     -- V-SLD Control --
-                    sld_en => '0', sld_shift => '0', sld_up => '0',
+                    sld_en => '0', sld_elem => (others => '0'), sld_up => '0', sld_last => '0',
                     -- VRF Control --
                     vrf_vs2 => vs2_i, vrf_vs1 => vs1_i, vrf_vd => vd, vrf_ben => byte_en, vrf_wr_sel => wr_sel,
                     -- O-SEL Control --
                     osel_imm => imm, osel_sel_op2 => sel_op2, osel_sel_op1 => sel_op1, osel_sel_imm => sel_imm, osel_scalar => scalar,
                     -- V-ALU Control --
                     valu_op => valu_op, valu_valid => valu_valid,
+                    -- V-LSU Control --
+                    vlsu_wen => '0', vlsu_addr => (others => '0'), vlsu_strd => (others => '0'), vlsu_mode => '0', vlsu_ordrd => '0', vlsu_vme => '0', vlsu_width => (others => '0'), vlsu_start => '0'
+                );
+                cp_result <= (others => '0');
+                cp_valid  <= '0';
+
+            -- SLIDE START --    
+            when SLIDE_START | SLIDE_EXEC =>
+                wr_sel := "01";
+                vs2_i  := src2;
+                vs1_i  := std_ulogic_vector(unsigned(src2) + 1);
+
+                if (state = SLIDE_START) or ((sld_done = '1') and (mul_count = vlmul_i)) then
+                    vsld_en := '0';
+                else
+                    vsld_en := '1';
+                end if;
+
+                if (mul_count = vlmul_i) then
+                    vsld_last := '1';
+                else
+                    vsld_last := '0';
+                end if;
+
+                case valu_op is
+                    when valu_sldup =>
+                        vsld_up   := '1';
+                        vsld_elem := std_ulogic_vector(elem_offset);
+                    when valu_slddn =>
+                        vsld_up   := '0';
+                        vsld_elem := std_ulogic_vector(elem_offset);
+                    when valu_sld1up =>
+                        vsld_up   := '1';
+                        vsld_elem := (0 => '1', others => '0');
+                    when valu_sld1dn =>
+                        vsld_up   := '0';
+                        vsld_elem := (0 => '1', others => '0');
+                    when others =>
+                end case;
+
+                if ((mul_count = "00001") and ((valu_op = valu_sldup) or (valu_op = valu_sld1up))) or
+                   ((mul_count = vlmul_i) and ((valu_op = valu_slddn) or (valu_op = valu_sld1dn))) then 
+                    ben_i := sld_be;
+                else
+                    ben_i := (others => '1');
+                end if;
+                -- TODO: implement masking using below variable
+                mask_i  := (others => '1');
+                byte_en := ben_i and mask_i;
+
+                vctrl <= (
+                    -- VI-Queue Control --
+                    viq_nxt => '0',
+                    -- CSR Control --
+                    csr_wen => (others => '0'), csr_vtype_n  => (others => '0'), csr_vl_n => (others => '0'), csr_vstart_n => (others => '0'),
+                    -- V-SLD Control --
+                    sld_en => vsld_en, sld_elem => vsld_elem, sld_up => vsld_up, sld_last => vsld_last,
+                    -- VRF Control --
+                    vrf_vs2 => vs2_i, vrf_vs1 => vs1_i, vrf_vd => dest, vrf_ben => byte_en, vrf_wr_sel => wr_sel,
+                    -- O-SEL Control --
+                    osel_imm => (others => '0'), osel_sel_op2 => '0', osel_sel_op1 => '0', osel_sel_imm => '0', osel_scalar => (others => '0'),
+                    -- V-ALU Control --
+                    valu_op => (others => '0'), valu_valid => '0',
                     -- V-LSU Control --
                     vlsu_wen => '0', vlsu_addr => (others => '0'), vlsu_strd => (others => '0'), vlsu_mode => '0', vlsu_ordrd => '0', vlsu_vme => '0', vlsu_width => (others => '0'), vlsu_start => '0'
                 );
@@ -401,7 +537,7 @@ begin
                     -- CSR Control --
                     csr_wen => (others => '0'), csr_vtype_n  => (others => '0'), csr_vl_n => (others => '0'), csr_vstart_n => (others => '0'),
                     -- V-SLD Control --
-                    sld_en => '0', sld_shift => '0', sld_up => '0',
+                    sld_en => '0', sld_elem => (others => '0'), sld_up => '0', sld_last => '0',
                     -- VRF Control --
                     vrf_vs2 => (others => '0'), vrf_vs1 => (others => '0'), vrf_vd => (others => '0'), vrf_ben => (others => '0'), vrf_wr_sel => (others => '0'),
                     -- O-SEL Control --
@@ -433,6 +569,8 @@ begin
                 elsif  (funct6 = "001001")                        then valu_op <= valu_and;
                 elsif  (funct6 = "001010")                        then valu_op <= valu_or;
                 elsif  (funct6 = "001011")                        then valu_op <= valu_xor;
+                elsif  (funct6 = "001110") and (funct3 /= "000")  then valu_op <= valu_sldup;
+                elsif  (funct6 = "001111") and (funct3 /= "000")  then valu_op <= valu_slddn;
                 elsif  (funct6 = "010000")                        then valu_op <= valu_adc;
                 elsif  (funct6 = "010001")                        then valu_op <= valu_madc;
                 elsif  (funct6 = "010010") and (funct3 /= "011")  then valu_op <= valu_sbc;

@@ -12,6 +12,8 @@ package neorv32_vpackage is
     constant XLEN            : natural := 32;
     constant VREF_ADDR_WIDTH : natural := 5;
     constant VALU_OP_WIDTH   : natural := 8;
+    constant MAX_VSEW        : natural := 32;
+    constant MAX_ELEM        : natural := (VLEN / MAX_VSEW);
 
     ---------------------------------------
     --- Vector Control/Status Registers ---
@@ -38,8 +40,9 @@ package neorv32_vpackage is
 
         -- V-SLD Control Signals --
         sld_en    : std_ulogic;
-        sld_shift : std_ulogic;
         sld_up    : std_ulogic;
+        sld_last  : std_ulogic;
+        sld_elem  : std_ulogic_vector(4 downto 0);
 
         -- VRF Control Signals --
         vrf_vs2    : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
@@ -137,7 +140,11 @@ package neorv32_vpackage is
     constant valu_nsrl       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2B";
     constant valu_nsra       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2C";
 
-    -- TODO: IMPLEMENT THE INSTRUCTIONS BELOW IN THE ALU --
-    constant valu_vgather       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2D";
+    constant valu_vgather    : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2D";
+
+    constant valu_sldup      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2E";
+    constant valu_slddn      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2F";
+    constant valu_sld1up     : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"30";
+    constant valu_sld1dn     : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"31";
 
 end neorv32_vpackage;
