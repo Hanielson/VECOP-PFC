@@ -14,7 +14,6 @@ entity vecop_sld_tb is
 end vecop_sld_tb;
 
 architecture tb of vecop_sld_tb is
-
     component neorv32_vecop is
         port(
             clk         : in std_ulogic;
@@ -28,9 +27,7 @@ architecture tb of vecop_sld_tb is
     signal RST         : std_ulogic                      := '0';
     signal VINST       : std_ulogic_vector(XLEN-1 downto 0);
     signal VINST_VALID : std_ulogic;
-
 begin
-    
     CLK <= not CLK after 10 ns;
 
     vecop: entity work.neorv32_vecop port map (
@@ -41,11 +38,9 @@ begin
     );
 
     stimuli: process begin
-
         RST <= '1';
         wait for 40 ns;
         RST <= '0';
-
         -- VSETVLI --> VLMUL = 1 | VSEW = 8 | VTA=VMA=0 | VL=MAXVL 
         --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
         VINST <= "0" & "00000000000" & "00000" & "111" & "11111" & "1010111";
@@ -62,7 +57,7 @@ begin
         wait for 600 ns;
         -- VSLIDEDN --> V2[i] = V24[i+10]
         --------    F6    | VM  |   VS2   |   IMM   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "001111" & "0" & "11000" & "00101" & "011" & "00010" & "1010111";
+        VINST <= "001111" & "0" & "11000" & "01010" & "011" & "00010" & "1010111";
         VINST_VALID <= '1';
         wait for 20 ns;
         VINST_VALID <= '0';
@@ -88,7 +83,7 @@ begin
         wait for 600 ns;
         -- VSLIDEDN --> V8[i] = V24[i+10]
         --------    F6    | VM  |   VS2   |   IMM   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "001111" & "0" & "11000" & "00101" & "011" & "01000" & "1010111";
+        VINST <= "001111" & "0" & "11000" & "01010" & "011" & "01000" & "1010111";
         VINST_VALID <= '1';
         wait for 20 ns;
         VINST_VALID <= '0';
@@ -114,7 +109,7 @@ begin
         wait for 600 ns;
         -- VSLIDEDN --> V18[i] = V24[i+10]
         --------    F6    | VM  |   VS2   |   IMM   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "001111" & "0" & "11000" & "00101" & "011" & "10010" & "1010111";
+        VINST <= "001111" & "0" & "11000" & "01010" & "011" & "10010" & "1010111";
         VINST_VALID <= '1';
         wait for 20 ns;
         VINST_VALID <= '0';
@@ -134,5 +129,4 @@ begin
 
         finish;
     end process;
-
-end tb;
+end architecture tb;

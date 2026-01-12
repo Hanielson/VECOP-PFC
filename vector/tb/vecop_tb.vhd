@@ -14,7 +14,6 @@ entity vecop_tb is
 end vecop_tb;
 
 architecture tb of vecop_tb is
-
     component neorv32_vecop is
         port(
             clk         : in std_ulogic;
@@ -28,9 +27,7 @@ architecture tb of vecop_tb is
     signal RST         : std_ulogic                      := '0';
     signal VINST       : std_ulogic_vector(XLEN-1 downto 0);
     signal VINST_VALID : std_ulogic;
-
 begin
-    
     CLK <= not CLK after 10 ns;
 
     vecop: entity work.neorv32_vecop port map (
@@ -41,11 +38,9 @@ begin
     );
 
     stimuli: process begin
-
         RST <= '1';
         wait for 40 ns;
         RST <= '0';
-
         -- VSETVLI --> VLMUL = 1 | VSEW = 8 | VTA=VMA=0 | VL=MAXVL 
         --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
         VINST <= "0" & "00000000000" & "00000" & "111" & "11111" & "1010111";
@@ -75,6 +70,10 @@ begin
         VINST_VALID <= '0';
         wait for 80 ns;
 
+        --------------------------------------------------------------------------------------------
+        --------------------------------------------------------------------------------------------
+        --------------------------------------------------------------------------------------------
+
         -- VSETVLI --> VLMUL = 1 | VSEW = 16 | VTA=VMA=0 | VL=MAXVL 
         --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
         VINST <= "0" & "00000001000" & "00000" & "111" & "11111" & "1010111";
@@ -99,6 +98,10 @@ begin
         wait for 20 ns;
         VINST_VALID <= '0';
         wait for 80 ns;
+
+        --------------------------------------------------------------------------------------------
+        --------------------------------------------------------------------------------------------
+        --------------------------------------------------------------------------------------------
 
         -- VSETVLI --> VLMUL = 1 | VSEW = 32 | VTA=VMA=0 | VL=MAXVL 
         --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
@@ -127,5 +130,4 @@ begin
 
         finish;
     end process;
-
-end tb;
+end architecture tb;
