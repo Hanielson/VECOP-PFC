@@ -10,18 +10,15 @@ entity neorv32_vsld is
         -- Clock and Reset --
         clk     : in std_ulogic;
         rst     : in std_ulogic;
-
         -- Slide Operands --
         sld_vs2 : in std_ulogic_vector(VLEN-1 downto 0);
         sld_vs1 : in std_ulogic_vector(VLEN-1 downto 0);
-
         -- Slide Control --
         vsew      : in std_ulogic_vector(2 downto 0);
         sld_en    : in std_ulogic;
         sld_up    : in std_ulogic;
         sld_last  : in std_ulogic;
-        sld_elem  : in std_ulogic_vector(4 downto 0);
-
+        sld_elem  : in std_ulogic_vector(ELEM_ID_WIDTH-1 downto 0);
         -- Slide Out --
         sld_out   : out std_ulogic_vector(VLEN-1 downto 0);
         sld_be    : out std_ulogic_vector((VLEN/8)-1 downto 0);
@@ -30,110 +27,77 @@ entity neorv32_vsld is
 end neorv32_vsld;
 
 architecture neorv32_vsld_rtl of neorv32_vsld is
-
     type sld_state_t is (IDLE, PRELOAD_UP, PRELOAD_DN, LOAD, SHIFT_UP, SHIFT_DN, DONE, WAIT_READ);
     signal state : sld_state_t;
-
+    signal elem_counter : std_ulogic_vector(ELEM_ID_WIDTH-1 downto 0);
+    signal num_elem     : std_ulogic_vector(ELEM_ID_WIDTH-1 downto 0);
     signal sld_i        : std_ulogic_vector((2*VLEN)-1 downto 0);
     signal be_i         : std_ulogic_vector((VLEN/8)-1 downto 0);
-    signal num_elem     : std_ulogic_vector(4 downto 0);
-    signal elem_counter : std_ulogic_vector(4 downto 0);
-
     signal sld_op1_i : std_ulogic_vector(VLEN-1 downto 0);
     signal sld_op0_i : std_ulogic_vector(VLEN-1 downto 0);
-    signal sld_en_i  : std_ulogic;
     signal sld_up_i  : std_ulogic;
-
 begin
-
-    -------------------------------------------
+    ------------------------------------------------
     --- SLD State Machine + Element elem_counter ---
-    -------------------------------------------
+    ------------------------------------------------
     process(clk, rst) begin
         if (rst = '1') then
             state        <= IDLE;
             elem_counter <= (others => '0');
             num_elem     <= (others => '0');
-            sld_out      <= (others => '0');
-            sld_be       <= (others => '0');
             sld_op1_i    <= (others => '0');
             sld_op0_i    <= (others => '0');
+            sld_up_i     <= '0';
+            sld_out      <= (others => '0');
+            sld_be       <= (others => '0');
         elsif rising_edge(clk) then
             case state is
                 when IDLE =>
-                    if (sld_en = '1') then
-                        if (sld_up = '1') then 
-                            state <= PRELOAD_UP;
-                        else                   
-                            state <= PRELOAD_DN;
-                        end if;
-                    end if;
+                    state    <= PRELOAD_UP when (sld_en = '1') and (sld_up = '1') else
+                                PRELOAD_DN when (sld_en = '1') and (sld_up = '0') else
+                                IDLE;
                     elem_counter <= (others => '0');
                     num_elem     <= sld_elem;
-                    sld_out      <= (others => '0');
-                    sld_be       <= (others => '0');
                     sld_op1_i    <= (others => '0');
                     sld_op0_i    <= (others => '0');
                     sld_up_i     <= sld_up;
-
+                    sld_out      <= (others => '0');
+                    sld_be       <= (others => '0');
                 when PRELOAD_UP =>
+                    state     <= LOAD;
                     sld_op1_i <= sld_vs2;
                     sld_op0_i <= sld_op1_i;
-                    state     <= LOAD;
-
+                    sld_up_i  <= '1';
                 when PRELOAD_DN =>
-                    if (sld_last = '1') then
-                        sld_op1_i <= (others => '0');
-                    else
-                        sld_op1_i <= sld_vs1;
-                    end if;
-                    sld_op0_i <= sld_vs2;
                     state     <= LOAD;
-
+                    sld_op1_i <= (others => '0') when (sld_last = '1') else sld_vs1;
+                    sld_op0_i <= sld_vs2;
+                    sld_up_i  <= '0';
                 when LOAD =>
-                    if (sld_up_i = '1') then 
-                        state <= SHIFT_UP;
-                    else                   
-                        state <= SHIFT_DN;
-                    end if;
-
+                    state <= SHIFT_UP when (sld_up_i = '1') else SHIFT_DN;
                 when SHIFT_UP =>
+                    state <= DONE when (elem_counter = num_elem) else SHIFT_UP;
                     if (elem_counter = num_elem) then 
-                        state   <= DONE;
                         sld_out <= sld_i((2*VLEN)-1 downto VLEN);
                         sld_be  <= be_i;
                     else                         
-                        state <= SHIFT_UP;
                         elem_counter <= std_ulogic_vector(unsigned(elem_counter) + 1);
                     end if;
-
                 when SHIFT_DN =>
+                    state <= DONE when (elem_counter = num_elem) else SHIFT_DN;
                     if (elem_counter = num_elem) then 
-                        state   <= DONE;
                         sld_out <= sld_i(VLEN-1 downto 0);
                         sld_be  <= be_i;
                     else                         
-                        state <= SHIFT_DN;
                         elem_counter <= std_ulogic_vector(unsigned(elem_counter) + 1);
                     end if;
-
                 when DONE =>
-                    if (sld_en = '1') then
-                        state <= WAIT_READ;
-                    else
-                        state <= IDLE; 
-                    end if;
+                    state        <= WAIT_READ when (sld_en = '1') else IDLE;
                     elem_counter <= (others => '0');
                     sld_be       <= (others => '0');
-
-                when WAIT_READ =>
-                    if (sld_up_i = '1') then
-                        state <= PRELOAD_UP;
-                    else
-                        state <= PRELOAD_DN;
-                    end if;
-
-                when others =>
+                when WAIT_READ => 
+                    state <= PRELOAD_UP when (sld_up_i = '1') else PRELOAD_DN;
+                when others => 
                     state <= IDLE;
             end case;
         end if;
@@ -160,7 +124,6 @@ begin
             case state is
                 when LOAD =>
                     sld_i <= sld_op1_i & sld_op0_i;
-
                 when SHIFT_UP =>
                     case vsew is
                         when "000"  => sld_i <= sld_i(sld_i'left-8 downto 0)  & x"00"      ; be_i <= be_i(be_i'left-1 downto 0) & "0";
@@ -168,7 +131,6 @@ begin
                         when "010"  => sld_i <= sld_i(sld_i'left-32 downto 0) & x"00000000"; be_i <= be_i(be_i'left-4 downto 0) & "0000";
                         when others => sld_i <= (others => '0');
                     end case;
-
                 when SHIFT_DN =>
                     case vsew is
                         when "000"  => sld_i <= x"00"       & sld_i(sld_i'left downto 8) ; be_i <= "0"    & be_i(be_i'left downto 1);
@@ -176,11 +138,9 @@ begin
                         when "010"  => sld_i <= x"00000000" & sld_i(sld_i'left downto 32); be_i <= "0000" & be_i(be_i'left downto 4);
                         when others => sld_i <= (others => '0');
                     end case;
-
-                when others =>
+                when others => 
                     sld_i <= (others => '0');
             end case;
         end if;
     end process;
-
 end architecture neorv32_vsld_rtl;

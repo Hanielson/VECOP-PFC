@@ -10,15 +10,18 @@ entity neorv32_vecop is
         -- Clock and Reset --
         clk     : in std_ulogic;
         rst     : in std_ulogic;
-
-        -- HACK: these ports should be removed after testing --
+        -- HACK: THESE PORTS SHOULD BE REMOVED AFTER TESTING --
         vinst       : in std_ulogic_vector(XLEN-1 downto 0);
-        vinst_valid : in std_ulogic
+        vinst_valid : in std_ulogic;
+        xor_alu_out : out std_ulogic;
+        xor_sld_out : out std_ulogic;
+        xor_vs2_out : out std_ulogic;
+        xor_vs1_out : out std_ulogic;
+        xor_vd_out  : out std_ulogic
     );
 end neorv32_vecop;
 
 architecture neorv32_vecop_rtl of neorv32_vecop is
-
     ------------------------------
     --- Component Declarations ---
     ------------------------------
@@ -102,11 +105,9 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
     signal vcsr  : vcsr_t;
     signal vctrl : vctrl_bus_t;
     signal vmask : std_ulogic_vector(VLEN-1 downto 0);
-
     -- VECOP Output Signals --
     signal cp_result : std_ulogic_vector(XLEN-1 downto 0);
     signal cp_valid  : std_ulogic;
-
     -- VCU Signals --
     -- signal vinst           : std_ulogic_vector(XLEN-1 downto 0);
     -- signal vinst_valid     : std_ulogic;
@@ -118,35 +119,40 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
     signal lsu_done        : std_ulogic;
     signal lsu_memtrp_id   : std_ulogic_vector(1 downto 0);
     signal lsu_memtrp_addr : std_ulogic_vector(XLEN-1 downto 0);
-
     -- vtype CSR Fields (some of them...) --
     signal vill  : std_ulogic;
     signal vma   : std_ulogic;
     signal vta   : std_ulogic;
     signal vsew  : std_ulogic_vector(2 downto 0);
     signal vlmul : std_ulogic_vector(2 downto 0);
-
     -- VRF Signals --
     signal wr_data : std_ulogic_vector(VLEN-1 downto 0);
-
     -- OP-SEL Signals --
     signal vs2_out : std_ulogic_vector(VLEN-1 downto 0);
     signal vs1_out : std_ulogic_vector(VLEN-1 downto 0);
     signal vd_out  : std_ulogic_vector(VLEN-1 downto 0);
-    
     -- ALU Signals --
     signal op2     : std_ulogic_vector(VLEN-1 downto 0);
     signal op1     : std_ulogic_vector(VLEN-1 downto 0);
     signal op0     : std_ulogic_vector(VLEN-1 downto 0);
     signal alu_out : std_ulogic_vector(VLEN-1 downto 0);
-
     -- SLD Signals --
     signal sld_out : std_ulogic_vector(VLEN-1 downto 0);
-
     -- LSU Signals --
     signal lsu_out : std_ulogic_vector(VLEN-1 downto 0);
 
+    ------------------------------------------------------------------------
+    
+    -- HACK: TEST IF VIVADO IS TRIMMING STUFF UP --
+    attribute DONT_TOUCH : string;
+    attribute DONT_TOUCH of neorv32_vecop_rtl : architecture is "TRUE";
 begin
+    -- HACK: THESE SIGNALS SHOULD BE REMOVED AFTER TESTING --
+    xor_alu_out <= xor alu_out;
+    xor_sld_out <= xor sld_out;
+    xor_vs2_out <= xor vs2_out;
+    xor_vs1_out <= xor vs1_out;
+    xor_vd_out  <= xor vd_out;
 
     ----------------------------------
     --- Sub-Modules Instantiations ---
@@ -249,6 +255,7 @@ begin
                 if (vctrl.csr_wen(0) = '1') then
                     vcsr.vstart <= vctrl.csr_vstart_n;
                 end if;
+                vcsr.vlenb <= vcsr.vlenb;
             end if;
         end if;
     end process VCSR_LOGIC;
@@ -280,7 +287,7 @@ begin
                 case vsew is
                     when "000"  => imm_scl(8*ii+7 downto 8*ii) := vctrl.osel_scalar(7 downto 0);
                     when "001"  => imm_scl(8*ii+7 downto 8*ii) := vctrl.osel_scalar(8*(ii mod 2)+7 downto 8*(ii mod 2));
-                    when "010"  => imm_scl(8*ii+7 downto 8*ii) := vctrl.osel_scalar(8*(ii mod 4)+7 downto 8*(ii mod 2));
+                    when "010"  => imm_scl(8*ii+7 downto 8*ii) := vctrl.osel_scalar(8*(ii mod 4)+7 downto 8*(ii mod 4));
                     when others => imm_scl(8*ii+7 downto 8*ii) := (others => '0');
                 end case;
             -- Select IMMEDIATE --
@@ -295,5 +302,4 @@ begin
         end loop;
         op1 <= vs1_out when (vctrl.osel_sel_op1 = '0') else imm_scl;
     end process OP_SEL;
-
-end neorv32_vecop_rtl;
+end architecture neorv32_vecop_rtl;

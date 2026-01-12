@@ -10,11 +10,9 @@ entity neorv32_valu is
         -- Clock and Reset --
         clk     : in std_ulogic;
         rst     : in std_ulogic;
-
         -- ALU Operation ID and Valid --
         alu_op  : in std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
         valid   : in std_ulogic;
-
         -- Vector Operands --
         op2     : in std_ulogic_vector(VLEN-1 downto 0);
         op1     : in std_ulogic_vector(VLEN-1 downto 0);
@@ -23,53 +21,42 @@ entity neorv32_valu is
         vmask   : in std_ulogic_vector(VLEN-1 downto 0);
         -- Vector Selected Element Width --
         vsew    : in std_ulogic_vector(2 downto 0);
-
         -- ALU Result --
         alu_out : out std_ulogic_vector(VLEN-1 downto 0)
     );
 end neorv32_valu;
 
 architecture neorv32_valu_rtl of neorv32_valu is
-
     -- ALU Cycle Indication --
     signal valu_cyc : std_ulogic_vector(2 downto 0);
-    
     -- Internal Vector Operands --
     signal op2_i     : std_ulogic_vector(VLEN-1 downto 0);
     signal op1_i     : std_ulogic_vector(VLEN-1 downto 0);
     signal op0_i     : std_ulogic_vector(VLEN-1 downto 0);
     signal vmask_i   : std_ulogic_vector(VLEN-1 downto 0);
     signal vsew_i    : std_ulogic_vector(2 downto 0);
-
     -- SUM/SUB Operation Signals --
     signal vcarry     : std_ulogic_vector((VLEN/8) downto 0);
     signal vcarry_in  : std_ulogic_vector((VLEN/8) downto 0);
     signal vcarry_out : std_ulogic_vector(VLEN-1 downto 0);
     signal add_temp   : std_ulogic_vector((VLEN-1)+(VLEN/8) downto 0);
     signal add_final  : std_ulogic_vector(VLEN-1 downto 0);
-
     -- INT-EXT Operation Signals --
     signal ext16 : std_ulogic_vector(VLEN-1 downto 0);
     signal ext32 : std_ulogic_vector(VLEN-1 downto 0);
-
     -- BITWISE Operation Signals --
     signal logic_final : std_ulogic_vector(VLEN-1 downto 0);
-
     -- SHIFT Signals --
     signal shift_out  : std_ulogic_vector(VLEN-1 downto 0);
     signal narrow_out : std_ulogic_vector((VLEN/2)-1 downto 0);
-
     -- COMPARISON Signals --
     signal comp_out : std_ulogic_vector(VLEN-1 downto 0);
-
     -- MERGE Signals --
     signal merge_out : std_ulogic_vector(VLEN-1 downto 0);
 
     ---------------------------
     --- AUXILIARY FUNCTIONS ---
     ---------------------------
-    
-    -- SHIFT OPERATIONS FUNCTION --
     function shift_map(sew  : integer; 
                        op   : std_ulogic_vector; 
                        op_a : std_ulogic_vector; 
@@ -79,9 +66,8 @@ architecture neorv32_valu_rtl of neorv32_valu is
     begin
         -- Defines how many bits from the element will be used to define the shift amount --
         shift_bits := integer(ceil(log2(real(sew)))) - 1;
-
         -- Byte/Byte2/Byte4 indexation, based on SEW (8, 16, 32 bits) --
-        for ii in 0 to ((VLEN / sew) - 1) loop
+        for ii in 0 to ((VLEN/sew)-1) loop
             case op is
                 when valu_sll             => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_left(unsigned(op_a(sew*ii+(sew-1) downto sew*ii)),  to_integer(unsigned(op_b(sew*ii+shift_bits downto sew*ii)))));
                 when valu_srl | valu_nsrl => result(sew*ii+(sew-1) downto sew*ii) := std_ulogic_vector(shift_right(unsigned(op_a(sew*ii+(sew-1) downto sew*ii)), to_integer(unsigned(op_b(sew*ii+shift_bits downto sew*ii)))));
@@ -92,20 +78,18 @@ architecture neorv32_valu_rtl of neorv32_valu is
         return result;
     end function shift_map;
 
-    -- NARROW MAPPING FUNCTION --
     function narrow_map(sew     : integer;
                         operand : std_ulogic_vector) return std_ulogic_vector is
         variable result   : std_ulogic_vector((VLEN/2)-1 downto 0);
         variable half_sew : integer;
     begin
         half_sew := sew/2;
-        for ii in 0 to ((VLEN / sew) - 1) loop
+        for ii in 0 to ((VLEN/sew)-1) loop
             result(half_sew*ii+(half_sew-1) downto half_sew*ii) := operand(sew*ii+(half_sew-1) downto sew*ii);
         end loop;
         return result;
     end function narrow_map;
 
-    -- COMPARISON OPERATION FUNCTION --
     function compare_map(idx     : integer;
                          sew     : integer;
                          alu_op  : std_ulogic_vector;
@@ -117,20 +101,17 @@ architecture neorv32_valu_rtl of neorv32_valu is
         variable result                   : std_ulogic := '0';
         variable elem                     : std_ulogic_vector(sew-1 downto 0) := (others => '0');
         variable borrow, ovflw, zero, neg : std_ulogic;
-
         variable ELEM_MSB, ELEM_LSB : natural;
         variable OP_MSB : natural;
     begin
         ELEM_MSB := sew*idx+(sew-1);
         ELEM_LSB := sew*idx;
-
         if (idx < (VLEN / sew)) then
             elem   := sub_out(ELEM_MSB downto ELEM_LSB);
             borrow := carry(idx);
             ovflw  := (op_a(ELEM_MSB) xor op_b(ELEM_MSB)) and (elem(elem'left) xor op_a(ELEM_MSB));
             zero   := not (or elem);
             neg    := elem(elem'left);
-
             case alu_op is
                 when valu_seq                           => result := '1' when (zero = '1')                                    else '0';
                 when valu_sne                           => result := '0' when (zero = '1')                                    else '1';
@@ -149,9 +130,7 @@ architecture neorv32_valu_rtl of neorv32_valu is
         end if;
         return result;
     end function compare_map;
-
 begin
-
     -----------------------
     -- ALU State Machine --
     -----------------------
@@ -280,7 +259,7 @@ begin
         end if;
     end process;
     --- This logic should be used by instructions like Sum w/ Carry_In, Merge Instructions---
-    CARRY_IN_GENERATE : for ii in 0 to ((VLEN / 8) - 1) generate
+    CARRY_IN_GENERATE : for ii in 0 to ((VLEN/8)-1) generate
         process(all) begin
             if ((alu_op = valu_adc) or (alu_op = valu_madc) or (alu_op = valu_sbc) or (alu_op = valu_msbc)) then
                 case vsew_i is
@@ -295,9 +274,11 @@ begin
         end process;
     end generate CARRY_IN_GENERATE;
 
-    -- Logic for Carry-Out Generation in Mask Format --
-    CARRY_OUT_GENERATE: for ii in 0 to (VLEN - 1) generate
-        CARRY_OUT_A: if (ii < (VLEN / 32)) and (ii < (VLEN / 16)) and (ii < (VLEN / 8)) generate
+    --------------------------------
+    -- CARRY OUT generation logic --
+    --------------------------------
+    CARRY_OUT_GENERATE: for ii in 0 to (VLEN-1) generate
+        CARRY_OUT_A: if (ii < (VLEN/32)) and (ii < (VLEN/16)) and (ii < (VLEN/8)) generate
             process(all) begin
                 case vsew_i is
                     when "000"  => vcarry_out(ii) <= add_temp(9*ii+8);
@@ -308,7 +289,7 @@ begin
             end process;
         end generate CARRY_OUT_A;
 
-        CARRY_OUT_B: if (ii >= (VLEN / 32)) and (ii < (VLEN / 16)) and (ii < (VLEN / 8)) generate
+        CARRY_OUT_B: if (ii >= (VLEN/32)) and (ii < (VLEN/16)) and (ii < (VLEN/8)) generate
             process(all) begin
                 case vsew_i is
                     when "000"  => vcarry_out(ii) <= add_temp(9*ii+8);
@@ -318,7 +299,7 @@ begin
             end process;
         end generate CARRY_OUT_B;
 
-        CARRY_OUT_C: if (ii >= (VLEN / 32)) and (ii >= (VLEN / 16)) and (ii < (VLEN / 8)) generate
+        CARRY_OUT_C: if (ii >= (VLEN/32)) and (ii >= (VLEN/16)) and (ii < (VLEN/8)) generate
             process(all) begin
                 case vsew_i is
                     when "000"  => vcarry_out(ii) <= add_temp(9*ii+8);
@@ -327,7 +308,7 @@ begin
             end process;
         end generate CARRY_OUT_C;
 
-        CARRY_OUT_D: if (ii >= (VLEN / 32)) and (ii >= (VLEN / 16)) and (ii >= (VLEN / 8)) generate
+        CARRY_OUT_D: if (ii >= (VLEN/32)) and (ii >= (VLEN/16)) and (ii >= (VLEN/8)) generate
             vcarry_out(ii) <= '0';
         end generate CARRY_OUT_D;
     end generate CARRY_OUT_GENERATE;
@@ -336,7 +317,7 @@ begin
     -- SUM logic for vadd/vsub/vrsub instructions --
     ------------------------------------------------
     vcarry(0) <= vcarry_in(0);
-    SUM_GENERATE : for ii in 0 to ((VLEN / 8) - 1) generate
+    SUM_GENERATE : for ii in 0 to ((VLEN/8)-1) generate
         -- Process to generate carry bits for SUM operation --
         process(all) begin
             -- If it's a multiple of 64 bits (done in case of expansion) --
@@ -353,7 +334,6 @@ begin
                 vcarry(ii+1) <= vcarry_in(ii+1) when (vsew_i = "000") else add_temp(9*ii+8);
             end if;
         end process;
-
         -- Intermediary ADD result to extract carry bit --
         process(all) 
             variable op_a, op_b, ext_b : std_ulogic_vector(VLEN-1 downto 0);
@@ -376,7 +356,6 @@ begin
                     add_temp(9*ii+8 downto 9*ii) <= (others => '0');
             end case;
         end process;
-
         -- Final ADD result --
         add_final(8*ii+7 downto 8*ii) <= add_temp(9*ii+7 downto 9*ii);
     end generate SUM_GENERATE;
@@ -384,7 +363,7 @@ begin
     -------------------------------------
     -- INT-EXT logic for SEW = 16 bits --
     -------------------------------------
-    INT_EXT_16b : for ii in 0 to ((VLEN / 16) - 1) generate
+    INT_EXT_16b : for ii in 0 to ((VLEN/16)-1) generate
         process(all)
             variable operand : std_ulogic_vector(VLEN-1 downto 0);
             variable offset_8b_1, offset_8b_2 : natural;
@@ -394,7 +373,6 @@ begin
                        op2_i;
             offset_8b_1 := 8*ii;
             offset_8b_2 := 8*(ii+(VLEN/16));
-
             -- INT-EXT: SEW/2 to SEW --
             if (alu_op = valu_zext_vf2) or (alu_op = valu_waddu_2sew) or (alu_op = valu_wsubu_2sew) or (alu_op = valu_nsrl) or (alu_op = valu_nsra) or (alu_op = valu_waddu) or (alu_op = valu_wsubu) then
                 case valu_cyc is
@@ -418,7 +396,7 @@ begin
     -------------------------------------
     -- INT-EXT logic for SEW = 32 bits --
     -------------------------------------
-    INT_EXT_32b : for ii in 0 to ((VLEN / 32) - 1) generate
+    INT_EXT_32b : for ii in 0 to ((VLEN/32)-1) generate
         process(all)
             variable operand : std_ulogic_vector(VLEN-1 downto 0);
             variable offset_16b_1, offset_16b_2 : natural;
@@ -433,7 +411,6 @@ begin
             offset_8b_2  := 8*(ii+(VLEN/32));
             offset_8b_3  := 8*(ii+(2*(VLEN/32)));
             offset_8b_4  := 8*(ii+(3*(VLEN/32)));
-
             -- INT-EXT: SEW/2 to SEW --
             if (alu_op = valu_zext_vf2) or (alu_op = valu_waddu_2sew) or (alu_op = valu_wsubu_2sew) or (alu_op = valu_nsrl) or (alu_op = valu_nsra) or (alu_op = valu_waddu) or (alu_op = valu_wsubu) then
                 case valu_cyc is
@@ -489,7 +466,6 @@ begin
             when valu_nsrl | valu_nsra => shift_op := ext16 when (vsew_i = "001") else ext32 when (vsew_i = "010") else (others => '0');
             when others                => shift_op := op1_i;
         end case;
-
         case vsew_i is
             when "000" => 
                 shift_out  <= shift_map(8,  alu_op, op2_i, shift_op);
@@ -509,7 +485,7 @@ begin
     --------------------------------------------------------------
     -- DATAPATH for SEW = [8, 16, 32] bits COMPARE instructions --
     --------------------------------------------------------------
-    COMP_DATAPATH: for idx in 0 to (VLEN - 1) generate
+    COMP_DATAPATH: for idx in 0 to (VLEN-1) generate
         process(all) begin
             case vsew_i is
                 when "000"  => comp_out(idx) <= compare_map(idx, 8,  alu_op, op2_i, op1_i, add_final, vcarry_out);
@@ -523,7 +499,7 @@ begin
     -------------------------------
     -- DATAPATH for Vector Merge --
     -------------------------------
-    MERGE_DATAPATH: for ii in 0 to ((VLEN / 8) - 1) generate
+    MERGE_DATAPATH: for ii in 0 to ((VLEN/8)-1) generate
         process(all)
             variable op_a, op_b   : std_ulogic_vector(VLEN-1 downto 0);
             variable merge_mask   : std_ulogic_vector(VLEN-1 downto 0);
@@ -540,5 +516,4 @@ begin
             merge_out(8*ii+7 downto 8*ii) <= op_b(8*ii+7 downto 8*ii) when (sel = '1') else op_a(8*ii+7 downto 8*ii);
         end process;
     end generate MERGE_DATAPATH;
-
-end neorv32_valu_rtl;
+end architecture neorv32_valu_rtl;
