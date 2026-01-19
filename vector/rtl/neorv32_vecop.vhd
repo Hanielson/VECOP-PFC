@@ -69,16 +69,17 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
 
     component neorv32_valu is
         port(
-            clk     : in std_ulogic;
-            rst     : in std_ulogic;
-            valid   : in std_ulogic;
-            op2     : in std_ulogic_vector(VLEN-1 downto 0);
-            op1     : in std_ulogic_vector(VLEN-1 downto 0);
-            op0     : in std_ulogic_vector(VLEN-1 downto 0);
-            alu_op  : in std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
-            vmask   : in std_ulogic_vector(XLEN-1 downto 0);
-            vsew    : in std_ulogic_vector(2 downto 0);
-            alu_out : out std_ulogic_vector(VLEN-1 downto 0)
+            clk      : in std_ulogic;
+            rst      : in std_ulogic;
+            alu_op   : in std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
+            valid    : in std_ulogic;
+            op2      : in std_ulogic_vector(VLEN-1 downto 0);
+            op1      : in std_ulogic_vector(VLEN-1 downto 0);
+            op0      : in std_ulogic_vector(VLEN-1 downto 0);
+            vmask    : in std_ulogic_vector(VALU_CHUNK_W-1 downto 0);
+            vsew     : in std_ulogic_vector(2 downto 0);
+            alu_out  : out std_ulogic_vector(VLEN-1 downto 0);
+            alu_done : out std_ulogic
         );
     end component neorv32_valu;
 
@@ -132,10 +133,11 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
     signal vs1_out : std_ulogic_vector(VLEN-1 downto 0);
     signal vd_out  : std_ulogic_vector(VLEN-1 downto 0);
     -- ALU Signals --
-    signal op2     : std_ulogic_vector(VLEN-1 downto 0);
-    signal op1     : std_ulogic_vector(VLEN-1 downto 0);
-    signal op0     : std_ulogic_vector(VLEN-1 downto 0);
-    signal alu_out : std_ulogic_vector(VLEN-1 downto 0);
+    signal op2      : std_ulogic_vector(VLEN-1 downto 0);
+    signal op1      : std_ulogic_vector(VLEN-1 downto 0);
+    signal op0      : std_ulogic_vector(VLEN-1 downto 0);
+    signal alu_out  : std_ulogic_vector(VLEN-1 downto 0);
+    signal alu_done : std_ulogic;
     -- SLD Signals --
     signal sld_out : std_ulogic_vector(VLEN-1 downto 0);
     -- LSU Signals --
@@ -197,16 +199,17 @@ begin
     );
 
     valu: entity work.neorv32_valu port map (
-        clk     => clk,
-        rst     => rst,
-        alu_op  => vctrl.valu_op,
-        valid   => vctrl.valu_valid,
-        op2     => op2,
-        op1     => op1,
-        op0     => op0,
-        vmask   => vmask,
-        vsew    => vsew,
-        alu_out => alu_out
+        clk      => clk,
+        rst      => rst,
+        alu_op   => vctrl.valu_op,
+        valid    => vctrl.valu_valid,
+        op2      => op2,
+        op1      => op1,
+        op0      => op0,
+        vmask    => vmask(VALU_CHUNK_W-1 downto 0),
+        vsew     => vsew,
+        alu_out  => alu_out,
+        alu_done => alu_done
     );
 
     vsld: entity work.neorv32_vsld port map (

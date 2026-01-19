@@ -16,6 +16,9 @@ package neorv32_vpackage is
     constant MIN_VSEW        : natural := 8;
     constant MAX_ELEM        : natural := (VLEN / MIN_VSEW);
     constant ELEM_ID_WIDTH   : natural := natural(ceil(log2(real(MAX_ELEM))));
+    constant VALU_CHUNK_W    : natural := 32;
+    constant MAX_CHUNK       : natural := (VLEN / VALU_CHUNK_W);
+    constant CHUNK_CNT_W     : natural := natural(ceil(log2(real(MAX_CHUNK))));
 
     ---------------------------------------
     --- Vector Control/Status Registers ---
