@@ -337,6 +337,9 @@ begin
     process(clk, rst) begin
         if (rst = '1') then
             out_chunks <= (others => (others => '0'));
+            m8_chunks  <= (others => (others => '0'));
+            m16_chunks <= (others => (others => '0'));
+            m32_chunks <= (others => (others => '0'));
         elsif rising_edge(clk) then
             case state is
                 when IDLE => 

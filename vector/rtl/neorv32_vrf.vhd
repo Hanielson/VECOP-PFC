@@ -78,9 +78,9 @@ begin
                 end if;
             end loop;
             vs2_out <= vregfile_0(to_integer(unsigned(vs2)));
-            vs1_out <= vregfile_0(to_integer(unsigned(vs1)));
-            vd_out  <= vregfile_0(to_integer(unsigned(vd)));
-            vmask   <= vregfile_0(0);
+            vs1_out <= vregfile_1(to_integer(unsigned(vs1)));
+            vd_out  <= vregfile_2(to_integer(unsigned(vd)));
+            vmask   <= vregfile_3(0);
         end if;
     end process;
 end architecture neorv32_vrf_rtl;
