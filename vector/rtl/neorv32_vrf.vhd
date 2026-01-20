@@ -54,7 +54,7 @@ architecture neorv32_vrf_rtl of neorv32_vrf is
         file_close(init_file);
         return ram_content;
     end function;
-    signal vregfile_0 : vregfile_t := init_ram("D:/UFMG/TCC/projeto/neorv32-main/rtl/vector/scripts/vrf_contents_simple.txt");
+    signal vregfile_0 : vregfile_t := init_ram("D:/UFMG/TCC/projeto/NeoRV32/vector/scripts/vrf_contents.txt");
     signal vregfile_1 : vregfile_t := vregfile_0;
     signal vregfile_2 : vregfile_t := vregfile_0;
     signal vregfile_3 : vregfile_t := vregfile_0;
@@ -78,9 +78,9 @@ begin
                 end if;
             end loop;
             vs2_out <= vregfile_0(to_integer(unsigned(vs2)));
-            vs1_out <= vregfile_1(to_integer(unsigned(vs1)));
-            vd_out  <= vregfile_2(to_integer(unsigned(vd)));
-            vmask   <= vregfile_3(0);
+            vs1_out <= vregfile_0(to_integer(unsigned(vs1)));
+            vd_out  <= vregfile_0(to_integer(unsigned(vd)));
+            vmask   <= vregfile_0(0);
         end if;
     end process;
 end architecture neorv32_vrf_rtl;
