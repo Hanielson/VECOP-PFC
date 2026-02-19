@@ -14,6 +14,7 @@ package neorv32_vpackage is
     constant VREF_ADDR_WIDTH : natural := 5;
     constant VALU_OP_WIDTH   : natural := 8;
     constant MIN_VSEW        : natural := 8;
+    constant MAX_VSEW        : natural := 32;
     constant MAX_ELEM        : natural := (VLEN / MIN_VSEW);
     constant ELEM_ID_WIDTH   : natural := natural(ceil(log2(real(MAX_ELEM))));
     constant VALU_CHUNK_W    : natural := 32;
@@ -36,31 +37,37 @@ package neorv32_vpackage is
     type vctrl_bus_t is record
         -- V-QUEUE Control Signals --
         viq_nxt : std_ulogic;
+
         -- CSR Control Signals --
         csr_wen      : std_ulogic_vector(2 downto 0);
         csr_vtype_n  : std_ulogic_vector(XLEN-1 downto 0);
         csr_vl_n     : std_ulogic_vector(XLEN-1 downto 0);
         csr_vstart_n : std_ulogic_vector(XLEN-1 downto 0);
+
         -- V-SLD Control Signals --
         sld_en    : std_ulogic;
         sld_up    : std_ulogic;
         sld_last  : std_ulogic;
         sld_elem  : std_ulogic_vector(ELEM_ID_WIDTH-1 downto 0);
+
         -- VRF Control Signals --
         vrf_vs2    : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
         vrf_vs1    : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
         vrf_vd     : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
         vrf_ben    : std_ulogic_vector((VLEN/8)-1 downto 0);
         vrf_wr_sel : std_ulogic_vector(1 downto 0);
+
         -- O-SEL Control Signals --
         osel_imm     : std_ulogic_vector(4 downto 0);
         osel_sel_op2 : std_ulogic;
         osel_sel_op1 : std_ulogic;
         osel_sel_imm : std_ulogic;
         osel_scalar  : std_ulogic_vector(XLEN-1 downto 0);
+
         -- V-ALU Control Signals --
         valu_op    : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
         valu_valid : std_ulogic;
+
         -- V-SLU Control Signals --
         vlsu_wen   : std_ulogic;
         vlsu_addr  : std_ulogic_vector(XLEN-1 downto 0);
@@ -70,6 +77,91 @@ package neorv32_vpackage is
         vlsu_vme   : std_ulogic;
         vlsu_width : std_ulogic_vector(2 downto 0);
         vlsu_start : std_ulogic;
+    end record;
+
+    --------------------------------------------
+    -- Vector Instruction Queue Interface Bus --
+    --------------------------------------------
+    type viq_if_t is record
+        inst  : std_ulogic_vector(XLEN-1 downto 0);
+        scal2 : std_ulogic_vector(XLEN-1 downto 0);
+        scal1 : std_ulogic_vector(XLEN-1 downto 0);
+        valid : std_ulogic;
+    end record;
+
+    -----------------------------------------------
+    --- Back-End Control/Response Interface Bus ---
+    -----------------------------------------------
+    type vback_ctrl_if is record
+        -- V-CSR Control Signals --
+        csr_wen      : std_ulogic_vector(2 downto 0);
+        csr_vtype_n  : std_ulogic_vector(XLEN-1 downto 0);
+        csr_vl_n     : std_ulogic_vector(XLEN-1 downto 0);
+        csr_vstart_n : std_ulogic_vector(XLEN-1 downto 0);
+
+        -- VRF Signals --
+        vrf_sel : std_ulogic_vector(1 downto 0);
+
+        -- O-SEL Control Signals --
+        osel_imm     : std_ulogic_vector(4 downto 0);
+        osel_sel_op2 : std_ulogic;
+        osel_sel_op1 : std_ulogic;
+        osel_sel_imm : std_ulogic;
+        osel_scalar  : std_ulogic_vector(XLEN-1 downto 0);
+
+        -- Dispatcher-Sequencers Control Signals --
+        vinst      : std_ulogic_vector(XLEN-1 downto 0);
+        scal2      : std_ulogic_vector(XLEN-1 downto 0);
+        scal1      : std_ulogic_vector(XLEN-1 downto 0);
+        valu_start : std_ulogic;
+        vsld_start : std_ulogic;
+        vlsu_start : std_ulogic;
+    end record;
+
+    type vback_resp_if is record
+        -- V-ALU Response Signals --
+        valu_seqend : std_ulogic;
+        valu_result : std_ulogic_vector(XLEN-1 downto 0);
+        
+        -- V-SLD Response Signals --
+        vsld_seqend : std_ulogic;
+        vsld_result : std_ulogic_vector(XLEN-1 downto 0);
+        
+        -- V-LSU Response Signals --
+        vlsu_seqend    : std_ulogic;
+        vlsu_result    : std_ulogic_vector(XLEN-1 downto 0);
+        vlsu_trap_id   : std_ulogic_vector(3 downto 0);
+        vlsu_trap_addr : std_ulogic_vector(XLEN-1 downto 0);
+    end record;
+
+    --------------------------------
+    -- SEQUENCERS Interface Buses --
+    --------------------------------
+    type valu_seq_if_t is record
+        vrf_vs2    : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        vrf_vs1    : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        vrf_vd     : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        vrf_ben    : std_ulogic_vector((VLEN/8)-1 downto 0);
+        valu_op    : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
+        valu_valid : std_ulogic;
+    end record;
+
+    -------------------------
+    --- VRF Interface Bus ---
+    -------------------------
+    type vrf_in_if_t is record
+        vs2     : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        vs1     : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        vd      : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        byte_en : std_ulogic_vector((VLEN/8)-1 downto 0);
+        result  : std_ulogic_vector(VLEN-1 downto 0);
+    end record;
+
+    type vrf_out_if_t is record
+        vs2   : std_ulogic_vector(VLEN-1 downto 0);
+        vs1   : std_ulogic_vector(VLEN-1 downto 0);
+        vd    : std_ulogic_vector(VLEN-1 downto 0);
+        vmask : std_ulogic_vector(VLEN-1 downto 0);
     end record;
 
     ----------------------
@@ -106,7 +198,7 @@ package neorv32_vpackage is
     constant valu_sll        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"15";
     constant valu_srl        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"16";
     constant valu_sra        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"17";
-    constant valu_seq        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"18";
+    constant valu_se         : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"18";
     constant valu_sne        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"19";
     constant valu_sltu       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"1A";
     constant valu_slt        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"1B";

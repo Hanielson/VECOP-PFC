@@ -12,18 +12,23 @@ entity neorv32_vrf is
     port(
         -- Clock --
         clk     : in std_ulogic;
+
         -- Address Ports --
         vs2     : in std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
         vs1     : in std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
         vd      : in std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+
         -- Write Byte Enable --
         wr_ben  : in std_ulogic_vector((VLEN/8)-1 downto 0);
+
         -- Write Data Port --
         wr_data : in std_ulogic_vector(VLEN-1 downto 0);
+
         -- Read Data Ports --
         vs2_out : out std_ulogic_vector(VLEN-1 downto 0);
         vs1_out : out std_ulogic_vector(VLEN-1 downto 0);
         vd_out  : out std_ulogic_vector(VLEN-1 downto 0);
+
         -- Mask Read Port --
         vmask   : out std_ulogic_vector(VLEN-1 downto 0)
     );
@@ -38,6 +43,7 @@ architecture neorv32_vrf_rtl of neorv32_vrf is
     -- NOTE: 4 copies of the VRF are needed to enable implementation via BRAMs, as each BRAM supports, at most, --
     --       1R+1W at the same clock cycle (Dual Ported RAM)                                                    --
     type vregfile_t is array ((2**VREF_ADDR_WIDTH)-1 downto 0) of std_ulogic_vector(VLEN-1 downto 0);
+
     impure function init_ram(file_name: string) return vregfile_t is
         file     init_file   : text;
         variable line_buffer : line;
@@ -54,10 +60,12 @@ architecture neorv32_vrf_rtl of neorv32_vrf is
         file_close(init_file);
         return ram_content;
     end function;
-    signal vregfile_0 : vregfile_t := init_ram("D:/UFMG/TCC/projeto/NeoRV32/vector/scripts/vrf_contents.txt");
+
+    signal vregfile_0 : vregfile_t := init_ram("D:/UFMG/TCC/projeto/NeoRV32/vector/scripts/vrf_contents_simple.txt");
     signal vregfile_1 : vregfile_t := vregfile_0;
     signal vregfile_2 : vregfile_t := vregfile_0;
     signal vregfile_3 : vregfile_t := vregfile_0;
+
     attribute ramstyle : string;
     attribute ramstyle of vregfile_0 : signal is "block";
     attribute ramstyle of vregfile_1 : signal is "block";
@@ -69,6 +77,7 @@ begin
     ----------------------------
     process(clk) begin
         if rising_edge(clk) then
+            -- WRITE --
             for byte in 0 to ((VLEN/8)-1) loop
                 if (wr_ben(byte) = '1') then
                     vregfile_0(to_integer(unsigned(vd)))(8*byte+7 downto 8*byte) <= wr_data(8*byte+7 downto 8*byte);
@@ -77,6 +86,7 @@ begin
                     vregfile_3(to_integer(unsigned(vd)))(8*byte+7 downto 8*byte) <= wr_data(8*byte+7 downto 8*byte);
                 end if;
             end loop;
+            -- READ --
             vs2_out <= vregfile_0(to_integer(unsigned(vs2)));
             vs1_out <= vregfile_0(to_integer(unsigned(vs1)));
             vd_out  <= vregfile_0(to_integer(unsigned(vd)));

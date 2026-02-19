@@ -8,15 +8,18 @@ use work.neorv32_vpackage.all;
 entity neorv32_viq is
     port(
         -- Clock and Reset --
-        clk       : in std_ulogic;
-        rst       : in std_ulogic;
+        clk : in std_ulogic;
+        rst : in std_ulogic;
+
         -- Inputs from Scalar Core --
-        vinst_in  : in std_ulogic_vector(XLEN-1 downto 0);
-        scal2_in  : in std_ulogic_vector(XLEN-1 downto 0);
-        scal1_in  : in std_ulogic_vector(XLEN-1 downto 0);
-        valid_in  : in std_ulogic;
+        vinst_in : in std_ulogic_vector(XLEN-1 downto 0);
+        scal2_in : in std_ulogic_vector(XLEN-1 downto 0);
+        scal1_in : in std_ulogic_vector(XLEN-1 downto 0);
+        valid_in : in std_ulogic;
+
         -- Inputs from VECOP --
-        vq_next   : in std_ulogic;
+        vq_next : in std_ulogic;
+        
         -- Outputs to VECOP --
         vinst_out : out std_ulogic_vector(XLEN-1 downto 0);
         scal2_out : out std_ulogic_vector(XLEN-1 downto 0);

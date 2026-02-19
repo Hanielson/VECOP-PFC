@@ -20,8 +20,8 @@ architecture tb of vecop_tb is
             rst            : in std_ulogic;
             vinst_in       : in std_ulogic_vector(XLEN-1 downto 0);
             vinst_valid_in : in std_ulogic;
-            vq_full        : out std_ulogic;
-            vq_empty       : out std_ulogic
+            viq_full       : out std_ulogic;
+            viq_empty      : out std_ulogic
         );
     end component neorv32_vecop;
 
@@ -53,8 +53,8 @@ begin
         rst            => RST,
         vinst_in       => VINST,
         vinst_valid_in => VINST_VALID,
-        vq_full        => VQ_FULL,
-        vq_empty       => VQ_EMPTY
+        viq_full       => VQ_FULL,
+        viq_empty      => VQ_EMPTY
     );
 
     stimuli: process begin
@@ -67,22 +67,19 @@ begin
         VINST <= "0" & "00000000000" & "00000" & "111" & "11111" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
 
-        -- VADD --> V2 = V0 + V1
+        -- VADD --> V9 = V0 + V1
         --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "000000" & "0" & "00000" & "00001" & "000" & "00010" & "1010111";
-        VINST_VALID <= '1';
-        wait for 20 ns;
-        VINST_VALID <= '0';
-        wait for 80 ns;
-
-        -- VADD --> V5 = V3 + V4
-        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "000000" & "0" & "00011" & "00100" & "000" & "00101" & "1010111";
+        VINST <= "000000" & "0" & "00000" & "00001" & "000" & "01001" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
 
-        -- VSEQ --> V0 = (V2 == V5)
+        -- VADD --> V10 = V3 + V4
         --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "011000" & "0" & "00010" & "00101" & "000" & "00000" & "1010111";
+        VINST <= "000000" & "0" & "00011" & "00100" & "000" & "01010" & "1010111";
+        send_instruction(VQ_FULL, VINST_VALID);
+
+        -- VSE --> V11 = (V9 == V10)
+        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
+        VINST <= "011000" & "0" & "01010" & "01001" & "000" & "01011" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
 
         --------------------------------------------------------------------------------------------
@@ -94,19 +91,19 @@ begin
         VINST <= "0" & "00000001000" & "00000" & "111" & "11111" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
 
-        -- VADD --> V2 = V0 + V1
+        -- VADD --> V13 = V0 + V1
         --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "000000" & "0" & "00000" & "00001" & "000" & "00010" & "1010111";
+        VINST <= "000000" & "0" & "00000" & "00001" & "000" & "01101" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
 
-        -- VADD --> V5 = V3 + V4
+        -- VADD --> V14 = V3 + V4
         --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "000000" & "0" & "00011" & "00100" & "000" & "00101" & "1010111";
+        VINST <= "000000" & "0" & "00011" & "00100" & "000" & "01110" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
 
-        -- VSEQ --> V0 = (V2 == V5)
+        -- VSE --> V15 = (V13 == V14)
         --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "011000" & "0" & "00010" & "00101" & "000" & "00000" & "1010111";
+        VINST <= "011000" & "0" & "01110" & "01101" & "000" & "01111" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
 
         --------------------------------------------------------------------------------------------
@@ -118,19 +115,19 @@ begin
         VINST <= "0" & "00000010000" & "00000" & "111" & "11111" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
 
-        -- VADD --> V2 = V0 + V1
+        -- VADD --> V17 = V0 + V1
         --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "000000" & "0" & "00000" & "00001" & "000" & "00010" & "1010111";
+        VINST <= "000000" & "0" & "00000" & "00001" & "000" & "10001" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
 
-        -- VADD --> V5 = V3 + V4
+        -- VADD --> V18 = V3 + V4
         --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "000000" & "0" & "00011" & "00100" & "000" & "00101" & "1010111";
+        VINST <= "000000" & "0" & "00011" & "00100" & "000" & "10010" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
 
-        -- VSEQ --> V0 = (V2 == V5)
+        -- VSE --> V19 = (V17 == V18)
         --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "011000" & "0" & "00010" & "00101" & "000" & "00000" & "1010111";
+        VINST <= "011000" & "0" & "10010" & "10001" & "000" & "10011" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
 
         while (VQ_EMPTY = '0') loop

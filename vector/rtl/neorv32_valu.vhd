@@ -141,7 +141,7 @@ architecture neorv32_valu_rtl of neorv32_valu is
             zero   := not (or elem);
             neg    := elem(elem'left);
             case alu_op is
-                when valu_seq                           => result := '1' when (zero = '1')                                    else '0';
+                when valu_se                            => result := '1' when (zero = '1')                                    else '0';
                 when valu_sne                           => result := '0' when (zero = '1')                                    else '1';
                 when valu_sltu | valu_minu | valu_maxu  => result := '1' when (borrow = '1')                                  else '0';
                 when valu_sgeu                          => result := '0' when (borrow = '1')                                  else '1';
@@ -212,7 +212,7 @@ begin
         OUT_CHUNK_EXTRACTING_INTERNAL: if (ii < (m32_chunks'length * m32_chunks(0)'length)) generate
             process(all) begin
                 case alu_op is
-                    when valu_seq | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
+                    when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
                         case vsew_i is
                             when "000"  => alu_out(ii) <= m8_chunks(ii/m8_chunks(0)'length)(ii mod m8_chunks(0)'length);
                             when "001"  => alu_out(ii) <= m16_chunks(ii/m16_chunks(0)'length)(ii mod m16_chunks(0)'length);
@@ -228,7 +228,7 @@ begin
         elsif (ii < (m16_chunks'length * m16_chunks(0)'length)) generate
             process(all) begin
                 case alu_op is
-                    when valu_seq | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
+                    when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
                         case vsew_i is
                             when "000"  => alu_out(ii) <= m8_chunks(ii/m8_chunks(0)'length)(ii mod m8_chunks(0)'length);
                             when "001"  => alu_out(ii) <= m16_chunks(ii/m16_chunks(0)'length)(ii mod m16_chunks(0)'length);
@@ -243,7 +243,7 @@ begin
         elsif (ii < (m8_chunks'length  * m8_chunks(0)'length)) generate
             process(all) begin
                 case alu_op is
-                    when valu_seq | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
+                    when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
                         case vsew_i is
                             when "000"  => alu_out(ii) <= m8_chunks(ii/m8_chunks(0)'length)(ii mod m8_chunks(0)'length);
                             when others => alu_out(ii) <= '0';
@@ -257,7 +257,7 @@ begin
         else generate
             process(all) begin
                 case alu_op is
-                    when valu_seq | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
+                    when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
                         alu_out(ii) <= '0';
 
                     when others =>
@@ -411,7 +411,7 @@ begin
                              ZEROES & narrow_out when ((vsew = "000") or (vsew = "001")) and (cycle_counter(0) = '0') else
                              (others => '0');
             -- COMPARISON OPERATIONS --
-            when valu_seq | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
+            when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
                 vsew_i    <= vsew;
                 alu_out_i <= comp_out;
             -- MIN/MAX AND MERGE OPERATIONS --
@@ -538,8 +538,8 @@ begin
                     op_b := extended(1) when (alu_op = valu_wsubu) or (alu_op = valu_wsubu_2sew) else op1_i;
                     add_temp(9*ii+8 downto 9*ii) <= std_ulogic_vector(resize(unsigned(op_a(8*ii+7 downto 8*ii)), 9) - resize(unsigned(op_b(8*ii+7 downto 8*ii)), 9) - vcarry(ii));
 
-                when valu_sub | valu_wsub_2sew | valu_wsub | valu_sbc  | valu_msbc | valu_seq  | 
-                     valu_sne | valu_slt       | valu_sle  | valu_sgt  | valu_sge  | valu_min  | valu_max =>
+                when valu_sub | valu_wsub_2sew | valu_wsub | valu_sbc  | valu_msbc | valu_se  | 
+                     valu_sne | valu_slt       | valu_sle  | valu_sgt  | valu_sge  | valu_min | valu_max =>
                     op_a := extended(2) when (alu_op = valu_wsub) else op2_i;
                     op_b := extended(1) when (alu_op = valu_wsub) or (alu_op = valu_wsub_2sew) else op1_i;
                     add_temp(9*ii+8 downto 9*ii) <= std_ulogic_vector(resize(unsigned(op_a(8*ii+7 downto 8*ii)), 9) - resize(unsigned(op_b(8*ii+7 downto 8*ii)), 9) - vcarry(ii));
