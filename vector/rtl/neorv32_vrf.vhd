@@ -39,11 +39,6 @@ end neorv32_vrf;
 -- LINK: https://www.intel.com/content/www/us/en/docs/programmable/683082/21-3/ram-with-byte-enable-signals.html --
 -------------------------------------------------------------------------------------------------------------------
 architecture neorv32_vrf_rtl of neorv32_vrf is
-    -- Vector Register File --
-    -- NOTE: 4 copies of the VRF are needed to enable implementation via BRAMs, as each BRAM supports, at most, --
-    --       1R+1W at the same clock cycle (Dual Ported RAM)                                                    --
-    type vregfile_t is array ((2**VREF_ADDR_WIDTH)-1 downto 0) of std_ulogic_vector(VLEN-1 downto 0);
-
     impure function init_ram(file_name: string) return vregfile_t is
         file     init_file   : text;
         variable line_buffer : line;
@@ -61,7 +56,10 @@ architecture neorv32_vrf_rtl of neorv32_vrf is
         return ram_content;
     end function;
 
-    signal vregfile_0 : vregfile_t := init_ram("D:/UFMG/TCC/projeto/NeoRV32/vector/scripts/vrf_contents_simple.txt");
+    -- Vector Register File --
+    -- NOTE: 4 copies of the VRF are needed to enable implementation via BRAMs, as each BRAM supports, at most, --
+    --       1R+1W at the same clock cycle (Dual Ported RAM)                                                    --
+    signal vregfile_0 : vregfile_t := init_ram("D:/UFMG/TCC/projeto/NeoRV32/vector/scripts/vrf_contents.txt");
     signal vregfile_1 : vregfile_t := vregfile_0;
     signal vregfile_2 : vregfile_t := vregfile_0;
     signal vregfile_3 : vregfile_t := vregfile_0;

@@ -171,6 +171,12 @@ package neorv32_vpackage is
     constant vop_store     : std_ulogic_vector(6 downto 0) := "0100111";
     constant vop_arith_cfg : std_ulogic_vector(6 downto 0) := "1010111";
 
+    --- VRF Register File Type Definition ---
+    type vregfile_t is array ((2**VREF_ADDR_WIDTH)-1 downto 0) of std_ulogic_vector(VLEN-1 downto 0);
+
+    --- VSEW Interpreted/Expanded Vector Type Definition ---
+    type expand_t is array (natural range <>) of std_ulogic_vector;
+
     ----------------------------
     --- V-ALU Operations IDs ---
     ----------------------------
@@ -206,22 +212,20 @@ package neorv32_vpackage is
     constant valu_sle        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"1D";
     constant valu_sgtu       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"1E";
     constant valu_sgt        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"1F";
-    constant valu_sgeu       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"20";
-    constant valu_sge        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"21";
-    constant valu_adc        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"22";
-    constant valu_madc       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"23";
-    constant valu_sbc        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"24";
-    constant valu_msbc       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"25";
-    constant valu_minu       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"26";
-    constant valu_min        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"27";
-    constant valu_maxu       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"28";
-    constant valu_max        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"29";
-    constant valu_merge      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2A";
-    constant valu_nsrl       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2B";
-    constant valu_nsra       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2C";
-    constant valu_vgather    : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2D";
-    constant valu_sldup      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2E";
-    constant valu_slddn      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2F";
-    constant valu_sld1up     : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"30";
-    constant valu_sld1dn     : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"31";
+    constant valu_adc        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"20";
+    constant valu_madc       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"21";
+    constant valu_sbc        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"22";
+    constant valu_msbc       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"23";
+    constant valu_minu       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"24";
+    constant valu_min        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"25";
+    constant valu_maxu       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"26";
+    constant valu_max        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"27";
+    constant valu_merge      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"28";
+    constant valu_nsrl       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"29";
+    constant valu_nsra       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2A";
+    constant valu_vgather    : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2B";
+    constant valu_sldup      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2C";
+    constant valu_slddn      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2D";
+    constant valu_sld1up     : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"3E";
+    constant valu_sld1dn     : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"3F";
 end neorv32_vpackage;

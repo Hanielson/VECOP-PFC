@@ -144,9 +144,7 @@ architecture neorv32_valu_rtl of neorv32_valu is
                 when valu_se                            => result := '1' when (zero = '1')                                    else '0';
                 when valu_sne                           => result := '0' when (zero = '1')                                    else '1';
                 when valu_sltu | valu_minu | valu_maxu  => result := '1' when (borrow = '1')                                  else '0';
-                when valu_sgeu                          => result := '0' when (borrow = '1')                                  else '1';
                 when valu_slt  | valu_min  | valu_max   => result := '1' when (neg = '1') xor (ovflw = '1')                   else '0';
-                when valu_sge                           => result := '0' when (neg = '1') xor (ovflw = '1')                   else '1';
                 when valu_sgt                           => result := '0' when ((neg = '1') xor (ovflw = '1')) or (zero = '1') else '1';
                 when valu_sle                           => result := '1' when ((neg = '1') xor (ovflw = '1')) or (zero = '1') else '0';
                 when valu_sgtu                          => result := '1' when (borrow = '0') and (zero = '0')                 else '0';
@@ -212,7 +210,7 @@ begin
         OUT_CHUNK_EXTRACTING_INTERNAL: if (ii < (m32_chunks'length * m32_chunks(0)'length)) generate
             process(all) begin
                 case alu_op is
-                    when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
+                    when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt =>
                         case vsew_i is
                             when "000"  => alu_out(ii) <= m8_chunks(ii/m8_chunks(0)'length)(ii mod m8_chunks(0)'length);
                             when "001"  => alu_out(ii) <= m16_chunks(ii/m16_chunks(0)'length)(ii mod m16_chunks(0)'length);
@@ -228,7 +226,7 @@ begin
         elsif (ii < (m16_chunks'length * m16_chunks(0)'length)) generate
             process(all) begin
                 case alu_op is
-                    when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
+                    when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt =>
                         case vsew_i is
                             when "000"  => alu_out(ii) <= m8_chunks(ii/m8_chunks(0)'length)(ii mod m8_chunks(0)'length);
                             when "001"  => alu_out(ii) <= m16_chunks(ii/m16_chunks(0)'length)(ii mod m16_chunks(0)'length);
@@ -243,7 +241,7 @@ begin
         elsif (ii < (m8_chunks'length  * m8_chunks(0)'length)) generate
             process(all) begin
                 case alu_op is
-                    when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
+                    when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt =>
                         case vsew_i is
                             when "000"  => alu_out(ii) <= m8_chunks(ii/m8_chunks(0)'length)(ii mod m8_chunks(0)'length);
                             when others => alu_out(ii) <= '0';
@@ -257,7 +255,7 @@ begin
         else generate
             process(all) begin
                 case alu_op is
-                    when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
+                    when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt =>
                         alu_out(ii) <= '0';
 
                     when others =>
@@ -411,7 +409,7 @@ begin
                              ZEROES & narrow_out when ((vsew = "000") or (vsew = "001")) and (cycle_counter(0) = '0') else
                              (others => '0');
             -- COMPARISON OPERATIONS --
-            when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt | valu_sgeu | valu_sge =>
+            when valu_se | valu_sne | valu_sltu | valu_slt | valu_sleu | valu_sle | valu_sgtu | valu_sgt =>
                 vsew_i    <= vsew;
                 alu_out_i <= comp_out;
             -- MIN/MAX AND MERGE OPERATIONS --
@@ -533,13 +531,13 @@ begin
                     op_b := extended(1) when (alu_op = valu_wadd) or (alu_op = valu_wadd_2sew) else op1_i;
                     add_temp(9*ii+8 downto 9*ii) <= std_ulogic_vector(resize(unsigned(op_a(8*ii+7 downto 8*ii)), 9) + resize(unsigned(op_b(8*ii+7 downto 8*ii)), 9) + vcarry(ii));
 
-                when valu_wsubu_2sew | valu_wsubu | valu_sltu | valu_sleu | valu_sgtu | valu_sgeu | valu_minu | valu_maxu  =>
+                when valu_wsubu_2sew | valu_wsubu | valu_sltu | valu_sleu | valu_sgtu | valu_minu | valu_maxu  =>
                     op_a := extended(2) when (alu_op = valu_wsubu) else op2_i;
                     op_b := extended(1) when (alu_op = valu_wsubu) or (alu_op = valu_wsubu_2sew) else op1_i;
                     add_temp(9*ii+8 downto 9*ii) <= std_ulogic_vector(resize(unsigned(op_a(8*ii+7 downto 8*ii)), 9) - resize(unsigned(op_b(8*ii+7 downto 8*ii)), 9) - vcarry(ii));
 
                 when valu_sub | valu_wsub_2sew | valu_wsub | valu_sbc  | valu_msbc | valu_se  | 
-                     valu_sne | valu_slt       | valu_sle  | valu_sgt  | valu_sge  | valu_min | valu_max =>
+                     valu_sne | valu_slt       | valu_sle  | valu_sgt  | valu_min  | valu_max =>
                     op_a := extended(2) when (alu_op = valu_wsub) else op2_i;
                     op_b := extended(1) when (alu_op = valu_wsub) or (alu_op = valu_wsub_2sew) else op1_i;
                     add_temp(9*ii+8 downto 9*ii) <= std_ulogic_vector(resize(unsigned(op_a(8*ii+7 downto 8*ii)), 9) - resize(unsigned(op_b(8*ii+7 downto 8*ii)), 9) - vcarry(ii));
@@ -601,24 +599,6 @@ begin
                                     extended(ii)(31 downto 16) <= (others => '0');
                             end case;
 
-                        when valu_zext_vf4 =>
-                            case chunk_counter is
-                                when "00"   => extended(ii) <= std_ulogic_vector(resize(unsigned(operand(7 downto 0)), 32));
-                                when "01"   => extended(ii) <= std_ulogic_vector(resize(unsigned(operand(15 downto 8)), 32));
-                                when "10"   => extended(ii) <= std_ulogic_vector(resize(unsigned(operand(23 downto 16)), 32));
-                                when "11"   => extended(ii) <= std_ulogic_vector(resize(unsigned(operand(31 downto 24)), 32));
-                                when others => extended(ii) <= (others => '0');
-                            end case;
-
-                        when valu_sext_vf4 =>
-                            case chunk_counter is
-                                when "00"   => extended(ii) <= std_ulogic_vector(resize(signed(operand(7 downto 0)), 32));
-                                when "01"   => extended(ii) <= std_ulogic_vector(resize(signed(operand(15 downto 8)), 32));
-                                when "10"   => extended(ii) <= std_ulogic_vector(resize(signed(operand(23 downto 16)), 32));
-                                when "11"   => extended(ii) <= std_ulogic_vector(resize(signed(operand(31 downto 24)), 32));
-                                when others => extended(ii) <= (others => '0');
-                            end case;
-
                         when others => extended(ii) <= (others => '0');
                     end case;
 
@@ -643,6 +623,24 @@ begin
                                     extended(ii) <= std_ulogic_vector(resize(signed(operand(31 downto 16)), 32));
                                 when others =>
                                     extended(ii) <= (others => '0');
+                            end case;
+
+                        when valu_zext_vf4 =>
+                            case chunk_counter is
+                                when "00"   => extended(ii) <= std_ulogic_vector(resize(unsigned(operand(7 downto 0)), 32));
+                                when "01"   => extended(ii) <= std_ulogic_vector(resize(unsigned(operand(15 downto 8)), 32));
+                                when "10"   => extended(ii) <= std_ulogic_vector(resize(unsigned(operand(23 downto 16)), 32));
+                                when "11"   => extended(ii) <= std_ulogic_vector(resize(unsigned(operand(31 downto 24)), 32));
+                                when others => extended(ii) <= (others => '0');
+                            end case;
+
+                        when valu_sext_vf4 =>
+                            case chunk_counter is
+                                when "00"   => extended(ii) <= std_ulogic_vector(resize(signed(operand(7 downto 0)), 32));
+                                when "01"   => extended(ii) <= std_ulogic_vector(resize(signed(operand(15 downto 8)), 32));
+                                when "10"   => extended(ii) <= std_ulogic_vector(resize(signed(operand(23 downto 16)), 32));
+                                when "11"   => extended(ii) <= std_ulogic_vector(resize(signed(operand(31 downto 24)), 32));
+                                when others => extended(ii) <= (others => '0');
                             end case;
 
                         when others => extended(ii) <= (others => '0');

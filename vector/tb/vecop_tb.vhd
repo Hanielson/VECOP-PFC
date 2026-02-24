@@ -25,10 +25,10 @@ architecture tb of vecop_tb is
         );
     end component neorv32_vecop;
 
-    signal CLK         : std_ulogic                      := '0';
-    signal RST         : std_ulogic                      := '0';
-    signal VINST       : std_ulogic_vector(XLEN-1 downto 0);
-    signal VINST_VALID : std_ulogic;
+    signal CLK         : std_ulogic                         := '0';
+    signal RST         : std_ulogic                         := '0';
+    signal VINST       : std_ulogic_vector(XLEN-1 downto 0) := (others => '0');
+    signal VINST_VALID : std_ulogic                         := '0';
     signal VQ_FULL     : std_ulogic;
     signal VQ_EMPTY    : std_ulogic;
 
@@ -41,9 +41,332 @@ architecture tb of vecop_tb is
             wait for 20 ns;
         end loop;
         valid <= '0';
-        wait for 80 ns;
+        wait for 40 ns;
     end procedure send_instruction;
 
+    procedure check_result_alu(
+        constant LMUL      : in integer;
+        constant DEST_LMUL : in integer;
+        constant INDEX     : in integer;
+        constant SEW       : in integer;
+        constant alu_op    : in std_ulogic_vector;
+        constant vs2       : in expand_t;
+        constant vs1       : in expand_t;
+        constant vd        : in std_ulogic_vector;
+        constant mask      : in std_ulogic_vector
+    ) is
+        constant DEST_SEW   : integer := (SEW * (DEST_LMUL/LMUL));
+        constant DEST_ELEM  : integer := (VLEN/DEST_SEW);
+        variable cycle_i    : integer;
+        variable shift_bits : integer;
+        variable temp_2sew  : std_ulogic_vector(DEST_SEW-1 downto 0);
+
+        variable check      : expand_t((VLEN/DEST_SEW)-1 downto 0)(DEST_SEW-1 downto 0);
+        variable full_check : std_ulogic_vector(VLEN-1 downto 0);
+    begin
+
+        cycle_i    := INDEX mod (DEST_LMUL/LMUL);
+        shift_bits := (integer(ceil(log2(real(DEST_SEW)))) - 1);
+        for ii in 0 to DEST_ELEM-1 loop
+            case alu_op is
+                when valu_waddu      => temp_2sew := std_ulogic_vector(resize(unsigned(vs2((cycle_i * DEST_ELEM) + ii)), DEST_SEW) + resize(unsigned(vs1((cycle_i * DEST_ELEM) + ii)), DEST_SEW));
+                when valu_wsubu      => temp_2sew := std_ulogic_vector(resize(unsigned(vs2((cycle_i * DEST_ELEM) + ii)), DEST_SEW) - resize(unsigned(vs1((cycle_i * DEST_ELEM) + ii)), DEST_SEW));
+                when valu_wadd       => temp_2sew := std_ulogic_vector(resize(signed(vs2((cycle_i * DEST_ELEM) + ii)), DEST_SEW) + resize(signed(vs1((cycle_i * DEST_ELEM) + ii)), DEST_SEW));
+                when valu_wsub       => temp_2sew := std_ulogic_vector(resize(signed(vs2((cycle_i * DEST_ELEM) + ii)), DEST_SEW) - resize(signed(vs1((cycle_i * DEST_ELEM) + ii)), DEST_SEW));
+                when valu_waddu_2sew => temp_2sew := std_ulogic_vector(unsigned(vs2(ii)) + resize(unsigned(vs1((cycle_i * DEST_ELEM) + ii)), DEST_SEW));
+                when valu_wsubu_2sew => temp_2sew := std_ulogic_vector(unsigned(vs2(ii)) - resize(unsigned(vs1((cycle_i * DEST_ELEM) + ii)), DEST_SEW));
+                when valu_wadd_2sew  => temp_2sew := std_ulogic_vector(signed(vs2(ii)) + resize(signed(vs1((cycle_i * DEST_ELEM) + ii)), DEST_SEW));
+                when valu_wsub_2sew  => temp_2sew := std_ulogic_vector(signed(vs2(ii)) - resize(signed(vs1((cycle_i * DEST_ELEM) + ii)), DEST_SEW));
+                when others          => temp_2sew := (others => '0');
+            end case;
+
+            check(ii) := (check(ii)'range => '0');
+            case alu_op is
+                when valu_waddu      | valu_wsubu      | valu_wadd      | valu_wsub |
+                     valu_waddu_2sew | valu_wsubu_2sew | valu_wadd_2sew | valu_wsub_2sew => check(ii) := (check(ii)'range => '0') when (SEW = 32) else temp_2sew;
+                when valu_add        => check(ii) := std_ulogic_vector(unsigned(vs2(ii)) + unsigned(vs1(ii)));
+                when valu_sub        => check(ii) := std_ulogic_vector(unsigned(vs2(ii)) - unsigned(vs1(ii)));
+                when valu_rsub       => check(ii) := std_ulogic_vector(unsigned(vs1(ii)) - unsigned(vs2(ii)));
+                when valu_zext_vf2   => check(ii) := (check(ii)'range => '0') when (SEW = 8) else std_ulogic_vector(resize(unsigned(vs2(cycle_i*DEST_ELEM+ii)), SEW));
+                when valu_sext_vf2   => check(ii) := (check(ii)'range => '0') when (SEW = 8) else std_ulogic_vector(resize(signed(vs2(cycle_i*DEST_ELEM+ii)), SEW));
+                when valu_zext_vf4   => check(ii) := (check(ii)'range => '0') when (SEW = 8) or (SEW = 16) else std_ulogic_vector(resize(unsigned(vs2(cycle_i*DEST_ELEM+ii)), SEW));
+                when valu_sext_vf4   => check(ii) := (check(ii)'range => '0') when (SEW = 8) or (SEW = 16) else std_ulogic_vector(resize(signed(vs2(cycle_i*DEST_ELEM+ii)), SEW));
+                when valu_and        => check(ii) := (vs2(ii) and vs1(ii));
+                when valu_or         => check(ii) := (vs2(ii) or  vs1(ii));
+                when valu_xor        => check(ii) := (vs2(ii) xor vs1(ii));
+                when valu_sll        => check(ii) := std_ulogic_vector(shift_left(unsigned(vs2(ii)), to_integer(unsigned(vs1(ii)(shift_bits downto 0)))));
+                when valu_srl        => check(ii) := std_ulogic_vector(shift_right(unsigned(vs2(ii)), to_integer(unsigned(vs1(ii)(shift_bits downto 0)))));
+                when valu_sra        => check(ii) := std_ulogic_vector(shift_right(signed(vs2(ii)), to_integer(unsigned(vs1(ii)(shift_bits downto 0)))));
+                when valu_se         => check(ii/SEW)(ii mod SEW) := '1' when (vs2(ii)  = vs1(ii)) else '0';
+                when valu_sne        => check(ii/SEW)(ii mod SEW) := '1' when (vs2(ii) /= vs1(ii)) else '0';
+                when valu_sltu       => check(ii/SEW)(ii mod SEW) := '1' when (unsigned(vs2(ii)) < unsigned(vs1(ii)))  else '0';
+                when valu_slt        => check(ii/SEW)(ii mod SEW) := '1' when (signed(vs2(ii)) < signed(vs1(ii)))      else '0';
+                when valu_sleu       => check(ii/SEW)(ii mod SEW) := '1' when (unsigned(vs2(ii)) <= unsigned(vs1(ii))) else '0';
+                when valu_sle        => check(ii/SEW)(ii mod SEW) := '1' when (signed(vs2(ii)) <= signed(vs1(ii)))     else '0';
+                when valu_sgtu       => check(ii/SEW)(ii mod SEW) := '1' when (unsigned(vs2(ii)) > unsigned(vs1(ii)))  else '0';
+                when valu_sgt        => check(ii/SEW)(ii mod SEW) := '1' when (signed(vs2(ii)) > signed(vs1(ii)))      else '0';
+                when valu_adc        => check(ii) := (check(ii)'range => '0');
+                when valu_madc       => check(ii) := (check(ii)'range => '0');
+                when valu_sbc        => check(ii) := (check(ii)'range => '0');
+                when valu_msbc       => check(ii) := (check(ii)'range => '0');
+                when valu_minu       => check(ii) := vs1(ii) when (unsigned(vs2(ii)) > unsigned(vs1(ii))) else vs2(ii);
+                when valu_min        => check(ii) := vs1(ii) when (signed(vs2(ii)) > signed(vs1(ii)))     else vs2(ii);
+                when valu_maxu       => check(ii) := vs1(ii) when (unsigned(vs2(ii)) < unsigned(vs1(ii))) else vs2(ii);
+                when valu_max        => check(ii) := vs1(ii) when (signed(vs2(ii)) < signed(vs1(ii)))     else vs2(ii);
+                when valu_merge      => check(ii) := vs1(ii) when mask(ii) = '1' else vs2(ii);
+                when valu_nsrl       => check(ii) := (check(ii)'range => '0');
+                when valu_nsra       => check(ii) := (check(ii)'range => '0');
+                when others          => check(ii) := (check(ii)'range => '0');
+            end case;
+
+            full_check(ii*DEST_SEW+DEST_SEW-1 downto ii*DEST_SEW) := check(ii);
+        end loop;
+
+        if (full_check = vd) then
+            report "V-ALU Operation Check -- LMUL loop index " & integer'image(INDEX) & " -- ACTUAL: " & to_hstring(vd) & " EXPECTED: " & to_hstring(full_check) & "...PASSED";
+        else
+            report "V-ALU Operation Check -- LMUL loop index " & integer'image(INDEX) & " -- ACTUAL: " & to_hstring(vd) & " EXPECTED: " & to_hstring(full_check) & "...FAILED";
+        end if;
+    end procedure check_result_alu;
+
+    procedure run_alu(
+        constant LMUL        : in  integer;
+        constant VSEW        : in  integer;
+        constant alu_op      : in  std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
+        constant vs2         : in  integer;
+        constant vs1         : in  integer;
+        constant vd          : in  integer;
+        signal   vregfile    : in  vregfile_t;
+        signal   viq_full    : in  std_ulogic;
+        signal   viq_empty   : in  std_ulogic;
+        signal   instr_valid : out std_ulogic
+    ) is
+        -- LMUL must be either [1, 2, 4, 8], so we have the vector with MAX_SIZE = 8 --
+        type lmul_array_t is array (natural range <>) of std_ulogic_vector(VLEN-1 downto 0);
+        variable vs2_data : lmul_array_t(0 to 7);
+        variable vs1_data : lmul_array_t(0 to 7);
+        variable vd_data  : lmul_array_t(0 to 7);
+
+        variable DEST_LMUL : integer := 0;
+
+        variable is_multiwidth : boolean := FALSE;
+        variable is_widening   : boolean := FALSE;
+        variable vs2_index     : integer := 0;
+        variable vs1_index     : integer := 0;
+
+        variable mask : std_ulogic_vector((VLEN/VSEW)-1 downto 0) := (others => '1');
+
+        variable vs2_type8  : expand_t((VLEN/8)-1 downto 0)(7 downto 0)   := (others => (others => '0'));
+        variable vs1_type8  : expand_t((VLEN/8)-1 downto 0)(7 downto 0)   := (others => (others => '0'));
+        variable vs2_type16 : expand_t((VLEN/16)-1 downto 0)(15 downto 0) := (others => (others => '0')); 
+        variable vs1_type16 : expand_t((VLEN/16)-1 downto 0)(15 downto 0) := (others => (others => '0'));
+        variable vs2_type32 : expand_t((VLEN/32)-1 downto 0)(31 downto 0) := (others => (others => '0'));
+        variable vs1_type32 : expand_t((VLEN/32)-1 downto 0)(31 downto 0) := (others => (others => '0'));
+    begin
+        -- Read operands vs2/vs1 values before dispatching the instruction (in case of destination overlap) --
+        -- TODO: there can be no overflow in register address for LMUL > 1, so when generating the instruction this needs to be respected --
+        for ii in 0 to LMUL-1 loop
+            vs2_data(ii) := vregfile(vs2 + ii);
+            vs1_data(ii) := vregfile(vs1 + ii);
+        end loop;
+
+        -- Send Instruction to FIFO and wait for it to complete (FIFO empty again) --
+        -- TODO: add support for FIFO backpressure       --
+        while (viq_empty = '0') loop
+            wait for 20 ns;
+        end loop;
+        -- Send out the instruction to the V-IQ FIFO --
+        instr_valid <= '1';
+        wait for 20 ns;
+        instr_valid <= '0';
+        wait for 20 ns;
+        -- Wait until the instruction is completed by checking FIFO status --
+        while (viq_empty = '0') loop
+            wait for 20 ns;
+        end loop;
+
+        -- Classify the instructions according to Destination Effective LMUL (EMUL), if it is Widening and/or Multi-Width --
+        case alu_op is
+            -- Widening Operations, but with same width operands --
+            when valu_waddu | valu_wsubu | valu_wadd | valu_wsub | valu_zext_vf2 | valu_sext_vf2 =>
+                DEST_LMUL     := (2 * LMUL);
+                is_multiwidth := FALSE;
+                is_widening   := TRUE;
+            -- Widening Operations (2 * SEW), with different width operands --
+            when valu_waddu_2sew | valu_wsubu_2sew | valu_wadd_2sew | valu_wsub_2sew =>
+                DEST_LMUL     := (2 * LMUL);
+                is_multiwidth := TRUE;
+                is_widening   := TRUE;
+            -- Widening Operations (4 * SEW), but with same width operands --
+            when valu_zext_vf4 | valu_sext_vf4 =>
+                DEST_LMUL     := (4 * LMUL);
+                is_multiwidth := FALSE;
+                is_widening   := TRUE;
+            -- Other Operations --
+            when others =>
+                DEST_LMUL     := LMUL;
+                is_multiwidth := FALSE;
+                is_widening   := TRUE;
+        end case;
+
+        -- Extract the destination value and calculate/check the operation results --
+        for ii in 0 to DEST_LMUL-1 loop
+            vd_data(ii) := vregfile(vd + ii);
+        end loop;
+
+        for ii in 0 to DEST_LMUL-1 loop
+            -- Calculate the corresponding indexes for the vs2/vs1 values in the list of extracted values --
+            vs2_index := ii when is_multiwidth else ii/(DEST_LMUL/LMUL);
+            vs1_index := ii/(DEST_LMUL/LMUL);
+
+            -- VSEW = 8 bits --
+            for jj in 0 to ((VLEN/8)-1) loop
+                vs2_type8(jj) := vs2_data(vs2_index)(8*jj+7 downto 8*jj);
+                vs1_type8(jj) := vs1_data(vs1_index)(8*jj+7 downto 8*jj);
+            end loop;
+            -- VSEW = 16 bits --
+            for jj in 0 to ((VLEN/16)-1) loop
+                vs2_type16(jj) := vs2_data(vs2_index)(16*jj+15 downto 16*jj);
+                vs1_type16(jj) := vs1_data(vs1_index)(16*jj+15 downto 16*jj);
+            end loop;
+            -- VSEW = 32 bits --
+            for jj in 0 to ((VLEN/32)-1) loop
+                vs2_type32(jj) := vs2_data(vs2_index)(32*jj+31 downto 32*jj);
+                vs1_type32(jj) := vs1_data(vs1_index)(32*jj+31 downto 32*jj);
+            end loop;
+
+            -- Check the result of the instruction, according to VSEW configuration and type of instruction --
+            if (VSEW = 8) then
+                if (is_multiwidth) then
+                    check_result_alu(LMUL, DEST_LMUL, ii, VSEW, alu_op, vs2_type16, vs1_type8, vd_data(ii), mask);
+                else
+                    check_result_alu(LMUL, DEST_LMUL, ii, VSEW, alu_op, vs2_type8, vs1_type8, vd_data(ii), mask);
+                end if;
+            elsif (VSEW = 16) then
+                if (is_multiwidth) then
+                    check_result_alu(LMUL, DEST_LMUL, ii, VSEW, alu_op, vs2_type32, vs1_type16, vd_data(ii), mask);
+                else
+                    check_result_alu(LMUL, DEST_LMUL, ii, VSEW, alu_op, vs2_type16, vs1_type16, vd_data(ii), mask);
+                end if;
+            elsif (VSEW = 32) then
+                if (is_multiwidth) then
+                    report "Widening operations with VSEW = 32 are not supported" severity error;
+                else
+                    check_result_alu(LMUL, DEST_LMUL, ii, VSEW, alu_op, vs2_type32, vs1_type32, vd_data(ii), mask);
+                end if;
+            else
+                report "Unsupported VSEW value: " & integer'image(VSEW) severity error;
+            end if;
+        end loop;
+    end procedure run_alu;
+
+    procedure test_alu(
+        constant LMUL        : in integer;
+        constant VSEW        : in integer;
+        signal   vregfile    : in vregfile_t;
+        signal   viq_full    : in std_ulogic;
+        signal   viq_empty   : in std_ulogic;
+        signal   instruction : out std_ulogic_vector(XLEN-1 downto 0);
+        signal   instr_valid : out std_ulogic
+    ) is
+        variable RV : RandomPType;
+
+        -- List of V-ALU Operations --
+        type valu_op_t is array (natural range <>) of std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
+        variable valu_op_pool : valu_op_t(0 to 29) := (
+            valu_add, valu_sub, valu_rsub,
+            valu_waddu, valu_wsubu, valu_wadd, valu_wsub,
+            valu_waddu_2sew, valu_wsubu_2sew, valu_wadd_2sew, valu_wsub_2sew,
+            -- valu_zext_vf2, valu_sext_vf2, valu_zext_vf4, valu_sext_vf4,
+            valu_and, valu_or, valu_xor, valu_sll, valu_srl, valu_sra,
+            valu_se, valu_sne, valu_sltu, valu_slt, valu_sleu, valu_sle, valu_sgtu, valu_sgt,
+            -- valu_adc, valu_madc, valu_sbc, valu_msbc,
+            valu_minu, valu_min, valu_maxu, valu_max,
+            valu_merge
+            -- valu_nsrl, valu_nsra,
+            -- valu_vgather
+        );
+        variable opname : string(1 to 11);
+
+        variable testop : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
+
+        variable funct6 : std_ulogic_vector(5 downto 0);
+        variable funct3 : std_ulogic_vector(2 downto 0);
+        variable vm     : std_ulogic;
+
+        variable vs2 : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        variable vs1 : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        variable vd  : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+
+        variable vs2_value : std_ulogic_vector(VLEN-1 downto 0);
+        variable vs1_value : std_ulogic_vector(VLEN-1 downto 0);
+        variable vd_value  : std_ulogic_vector(VLEN-1 downto 0);
+    begin
+        -- Initialize seed for random number generator --
+        RV.InitSeed(RV'instance_name);
+
+        -- TODO: add support for masked operations --
+        vm := '0';
+
+        for ii in valu_op_pool'range loop
+            -- Get current operation to be tested from the pool --
+            testop := valu_op_pool(ii);
+
+            -- TODO: increase supported combination of funct6 and funct3 to test more operation types --
+            -- Operation FUNCT6 / FUNCT3 Lookup Table --
+            case testop is
+                when valu_add        => funct6 := "000000"; funct3 := "000"; opname := "VADD       ";
+                when valu_sub        => funct6 := "000010"; funct3 := "000"; opname := "VSUB       ";
+                when valu_rsub       => funct6 := "000011"; funct3 := "100"; opname := "VRSUB      ";
+                when valu_waddu      => funct6 := "110000"; funct3 := "010"; opname := "VWADDU     ";
+                when valu_wsubu      => funct6 := "110010"; funct3 := "010"; opname := "VWSUBU     ";
+                when valu_wadd       => funct6 := "110001"; funct3 := "010"; opname := "VWADD      ";
+                when valu_wsub       => funct6 := "110011"; funct3 := "010"; opname := "VWSUB      ";
+                when valu_waddu_2sew => funct6 := "110100"; funct3 := "010"; opname := "VWADDU_2SEW";
+                when valu_wsubu_2sew => funct6 := "110110"; funct3 := "010"; opname := "VWSUBU_2SEW";
+                when valu_wadd_2sew  => funct6 := "110101"; funct3 := "010"; opname := "VWADD_2SEW ";
+                when valu_wsub_2sew  => funct6 := "110111"; funct3 := "010"; opname := "VWSUB_2SEW ";
+                -- when valu_zext_vf2   => funct6 := "000000"; funct3 := "001"; opname := "VZEXT_VF2  ";
+                -- when valu_sext_vf2   => funct6 := "000000"; funct3 := "001"; opname := "VZEXT_VF2  ";
+                -- when valu_zext_vf4   => funct6 := "000000"; funct3 := "001"; opname := "VZEXT_VF2  ";
+                -- when valu_sext_vf4   => funct6 := "000000"; funct3 := "001"; opname := "VZEXT_VF2  ";
+                when valu_and        => funct6 := "001001"; funct3 := "000"; opname := "VAND       ";
+                when valu_or         => funct6 := "001010"; funct3 := "000"; opname := "VOR        ";
+                when valu_xor        => funct6 := "001011"; funct3 := "000"; opname := "VXOR       ";
+                when valu_sll        => funct6 := "100101"; funct3 := "000"; opname := "VSLL       ";
+                when valu_srl        => funct6 := "101000"; funct3 := "000"; opname := "VSRL       ";
+                when valu_sra        => funct6 := "101001"; funct3 := "000"; opname := "VSRA       ";
+                when valu_se         => funct6 := "011000"; funct3 := "000"; opname := "VSE        ";
+                when valu_sne        => funct6 := "011001"; funct3 := "000"; opname := "VSNE       ";
+                when valu_sltu       => funct6 := "011010"; funct3 := "000"; opname := "VSLTU      ";
+                when valu_slt        => funct6 := "011011"; funct3 := "000"; opname := "VSLT       ";
+                when valu_sleu       => funct6 := "011100"; funct3 := "000"; opname := "VSLEU      ";
+                when valu_sle        => funct6 := "011101"; funct3 := "000"; opname := "VSLE       ";
+                when valu_sgtu       => funct6 := "011110"; funct3 := "100"; opname := "VSGTU      ";
+                when valu_sgt        => funct6 := "011111"; funct3 := "100"; opname := "VSGT       ";
+                when valu_minu       => funct6 := "000100"; funct3 := "000"; opname := "VMINU      ";
+                when valu_min        => funct6 := "000101"; funct3 := "000"; opname := "VMIN       ";
+                when valu_maxu       => funct6 := "000110"; funct3 := "000"; opname := "VMAXU      ";
+                when valu_max        => funct6 := "000111"; funct3 := "000"; opname := "VMAX       ";
+                when valu_merge      => funct6 := "010111"; funct3 := "000"; opname := "VMERGE     ";
+                when others          => report "Selected V-ALU Operation " & to_string(testop) & " is not supported" severity error;
+            end case;
+
+            -- TODO: some restriction needs to be set for widening operations and some others --
+            --       that don't support overlap between source and destination registers      --
+            vs2 := std_ulogic_vector(to_unsigned(RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1), VREF_ADDR_WIDTH));
+            vs1 := std_ulogic_vector(to_unsigned(RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1), VREF_ADDR_WIDTH));
+            vd  := std_ulogic_vector(to_unsigned(RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1), VREF_ADDR_WIDTH));
+
+            -- Construct the instruction word --
+            instruction <= funct6 & vm & vs2 & vs1 & funct3 & vd & vop_arith_cfg;
+
+            report "TESTING V-ALU OPERATION: " & opname;
+            run_alu(LMUL, VSEW, testop, to_integer(unsigned(vs2)), to_integer(unsigned(vs1)), to_integer(unsigned(vd)), vregfile, viq_full, viq_empty, instr_valid);
+            
+            wait for 80 ns;
+        end loop;
+    end procedure test_alu;
 begin
 
     CLK <= not CLK after 10 ns;
@@ -57,30 +380,22 @@ begin
         viq_empty      => VQ_EMPTY
     );
 
-    stimuli: process begin
+    stimuli: process
+        alias vregfile : vregfile_t is << signal .vecop_tb.vecop.vrf.vregfile_0 : vregfile_t >>;
+    begin
+
+        RST <= '0';
+        wait for 40 ns;
         RST <= '1';
         wait for 40 ns;
         RST <= '0';
+        wait for 40 ns;
 
         -- VSETVLI --> VLMUL = 1 | VSEW = 8 | VTA=VMA=0 | VL=MAXVL 
         --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
         VINST <= "0" & "00000000000" & "00000" & "111" & "11111" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
-
-        -- VADD --> V9 = V0 + V1
-        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "000000" & "0" & "00000" & "00001" & "000" & "01001" & "1010111";
-        send_instruction(VQ_FULL, VINST_VALID);
-
-        -- VADD --> V10 = V3 + V4
-        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "000000" & "0" & "00011" & "00100" & "000" & "01010" & "1010111";
-        send_instruction(VQ_FULL, VINST_VALID);
-
-        -- VSE --> V11 = (V9 == V10)
-        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "011000" & "0" & "01010" & "01001" & "000" & "01011" & "1010111";
-        send_instruction(VQ_FULL, VINST_VALID);
+        test_alu(1, 8, vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
 
         --------------------------------------------------------------------------------------------
         --------------------------------------------------------------------------------------------
@@ -90,21 +405,7 @@ begin
         --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
         VINST <= "0" & "00000001000" & "00000" & "111" & "11111" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
-
-        -- VADD --> V13 = V0 + V1
-        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "000000" & "0" & "00000" & "00001" & "000" & "01101" & "1010111";
-        send_instruction(VQ_FULL, VINST_VALID);
-
-        -- VADD --> V14 = V3 + V4
-        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "000000" & "0" & "00011" & "00100" & "000" & "01110" & "1010111";
-        send_instruction(VQ_FULL, VINST_VALID);
-
-        -- VSE --> V15 = (V13 == V14)
-        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "011000" & "0" & "01110" & "01101" & "000" & "01111" & "1010111";
-        send_instruction(VQ_FULL, VINST_VALID);
+        test_alu(1, 16, vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
 
         --------------------------------------------------------------------------------------------
         --------------------------------------------------------------------------------------------
@@ -114,21 +415,7 @@ begin
         --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
         VINST <= "0" & "00000010000" & "00000" & "111" & "11111" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
-
-        -- VADD --> V17 = V0 + V1
-        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "000000" & "0" & "00000" & "00001" & "000" & "10001" & "1010111";
-        send_instruction(VQ_FULL, VINST_VALID);
-
-        -- VADD --> V18 = V3 + V4
-        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "000000" & "0" & "00011" & "00100" & "000" & "10010" & "1010111";
-        send_instruction(VQ_FULL, VINST_VALID);
-
-        -- VSE --> V19 = (V17 == V18)
-        --------    F6    | VM  |   VS2   |   VS1   |  F3   |  VD/RD  |  OPCODE  |
-        VINST <= "011000" & "0" & "10010" & "10001" & "000" & "10011" & "1010111";
-        send_instruction(VQ_FULL, VINST_VALID);
+        test_alu(1, 32, vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
 
         while (VQ_EMPTY = '0') loop
             wait for 20 ns;
@@ -137,4 +424,5 @@ begin
 
         finish;
     end process;
+
 end architecture tb;
