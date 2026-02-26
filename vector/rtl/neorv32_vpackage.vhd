@@ -8,18 +8,21 @@ package neorv32_vpackage is
     -------------------------------
     --- Architectural Constants ---
     -------------------------------
-    constant RVV_VERSION     : string  := "v1.0";
-    constant VLEN            : natural := 128;
-    constant XLEN            : natural := 32;
-    constant VREF_ADDR_WIDTH : natural := 5;
-    constant VALU_OP_WIDTH   : natural := 8;
-    constant MIN_VSEW        : natural := 8;
-    constant MAX_VSEW        : natural := 32;
-    constant MAX_ELEM        : natural := (VLEN / MIN_VSEW);
-    constant ELEM_ID_WIDTH   : natural := natural(ceil(log2(real(MAX_ELEM))));
-    constant VALU_CHUNK_W    : natural := 32;
-    constant MAX_CHUNK       : natural := (VLEN / VALU_CHUNK_W);
-    constant CHUNK_CNT_W     : natural := natural(ceil(log2(real(MAX_CHUNK))));
+    constant RVV_VERSION      : string  := "v1.0";
+    constant VLEN             : natural := 128;
+    constant XLEN             : natural := 32;
+    constant VREF_ADDR_WIDTH  : natural := 5;
+    constant VALU_OP_WIDTH    : natural := 8;
+    constant MIN_VSEW         : natural := 8;
+    constant MAX_VSEW         : natural := 32;
+    constant MAX_ELEM         : natural := (VLEN / MIN_VSEW);
+    constant ELEM_ID_WIDTH    : natural := natural(ceil(log2(real(MAX_ELEM))));
+    constant VALU_CHUNK_W     : natural := 32;
+    constant MAX_CHUNK        : natural := (VLEN / VALU_CHUNK_W);
+    constant CHUNK_CNT_W      : natural := natural(ceil(log2(real(MAX_CHUNK))));
+    constant VLSU_MEM_W       : natural := 32;
+    constant VLSU_MAX_CHUNK   : natural := (VLEN / VLSU_MEM_W);
+    constant VLSU_CHUNK_CNT_W : natural := natural(ceil(log2(real(VLSU_MAX_CHUNK))));
 
     ---------------------------------------
     --- Vector Control/Status Registers ---
@@ -146,22 +149,17 @@ package neorv32_vpackage is
         valu_valid : std_ulogic;
     end record;
 
-    -------------------------
-    --- VRF Interface Bus ---
-    -------------------------
-    type vrf_in_if_t is record
-        vs2     : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
-        vs1     : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
-        vd      : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
-        byte_en : std_ulogic_vector((VLEN/8)-1 downto 0);
-        result  : std_ulogic_vector(VLEN-1 downto 0);
-    end record;
-
-    type vrf_out_if_t is record
-        vs2   : std_ulogic_vector(VLEN-1 downto 0);
-        vs1   : std_ulogic_vector(VLEN-1 downto 0);
-        vd    : std_ulogic_vector(VLEN-1 downto 0);
-        vmask : std_ulogic_vector(VLEN-1 downto 0);
+    type vlsu_seq_if_t is record
+        vrf_vs2   : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        vrf_vs1   : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        vrf_vd    : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        vrf_wdata : std_ulogic_vector(VLEN-1 downto 0);
+        vrf_ben   : std_ulogic_vector((VLEN/8)-1 downto 0);
+        mem_strb  : std_ulogic;
+        mem_rw    : std_ulogic;
+        mem_addr  : std_ulogic_vector(XLEN-1 downto 0);
+        mem_wdata : std_ulogic_vector(VLSU_MEM_W-1 downto 0);
+        mem_ben   : std_ulogic_vector((VLSU_MEM_W/8)-1 downto 0);
     end record;
 
     ----------------------

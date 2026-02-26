@@ -19,6 +19,8 @@ architecture tb of vecop_tb is
             clk            : in std_ulogic;
             rst            : in std_ulogic;
             vinst_in       : in std_ulogic_vector(XLEN-1 downto 0);
+            scal2_in       : in std_ulogic_vector(XLEN-1 downto 0);
+            scal1_in       : in std_ulogic_vector(XLEN-1 downto 0);
             vinst_valid_in : in std_ulogic;
             viq_full       : out std_ulogic;
             viq_empty      : out std_ulogic
@@ -28,6 +30,8 @@ architecture tb of vecop_tb is
     signal CLK         : std_ulogic                         := '0';
     signal RST         : std_ulogic                         := '0';
     signal VINST       : std_ulogic_vector(XLEN-1 downto 0) := (others => '0');
+    signal SCAL2       : std_ulogic_vector(XLEN-1 downto 0) := (others => '0');
+    signal SCAL1       : std_ulogic_vector(XLEN-1 downto 0) := (others => '0');
     signal VINST_VALID : std_ulogic                         := '0';
     signal VQ_FULL     : std_ulogic;
     signal VQ_EMPTY    : std_ulogic;
@@ -375,6 +379,8 @@ begin
         clk            => CLK,
         rst            => RST,
         vinst_in       => VINST,
+        scal2_in       => SCAL2,
+        scal1_in       => SCAL1,
         vinst_valid_in => VINST_VALID,
         viq_full       => VQ_FULL,
         viq_empty      => VQ_EMPTY

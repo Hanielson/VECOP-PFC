@@ -13,6 +13,8 @@ entity neorv32_vecop is
 
         -- Scalar Core Interface --
         vinst_in       : in std_ulogic_vector(XLEN-1 downto 0);
+        scal2_in       : in std_ulogic_vector(XLEN-1 downto 0);
+        scal1_in       : in std_ulogic_vector(XLEN-1 downto 0);
         vinst_valid_in : in std_ulogic;
         viq_full       : out std_ulogic;
         viq_empty      : out std_ulogic
@@ -48,6 +50,21 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
         );
     end component neorv32_vdispatcher;
 
+    component neorv32_vrf is
+        port(
+            clk     : in std_ulogic;
+            vs2     : in std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+            vs1     : in std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+            vd      : in std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+            wr_ben  : in std_ulogic_vector((VLEN/8)-1 downto 0);
+            wr_data : in std_ulogic_vector(VLEN-1 downto 0);
+            vs2_out : out std_ulogic_vector(VLEN-1 downto 0);
+            vs1_out : out std_ulogic_vector(VLEN-1 downto 0);
+            vd_out  : out std_ulogic_vector(VLEN-1 downto 0);
+            vmask   : out std_ulogic_vector(VLEN-1 downto 0)
+        );
+    end component neorv32_vrf;
+
     component neorv32_valu_seq is
         port(
             clk      : in std_ulogic;
@@ -64,21 +81,6 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
             result   : out std_ulogic_vector(XLEN-1 downto 0)
         );
     end component neorv32_valu_seq;
-
-    component neorv32_vrf is
-        port(
-            clk     : in std_ulogic;
-            vs2     : in std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
-            vs1     : in std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
-            vd      : in std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
-            wr_ben  : in std_ulogic_vector((VLEN/8)-1 downto 0);
-            wr_data : in std_ulogic_vector(VLEN-1 downto 0);
-            vs2_out : out std_ulogic_vector(VLEN-1 downto 0);
-            vs1_out : out std_ulogic_vector(VLEN-1 downto 0);
-            vd_out  : out std_ulogic_vector(VLEN-1 downto 0);
-            vmask   : out std_ulogic_vector(VLEN-1 downto 0)
-        );
-    end component neorv32_vrf;
 
     component neorv32_valu is
         port(
@@ -113,6 +115,41 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
         );
     end component neorv32_vsld;
 
+    component neorv32_vlsu is
+        port(
+            clk           : in std_ulogic;
+            rst           : in std_ulogic;
+            vinst         : in std_ulogic_vector(XLEN-1 downto 0);
+            scal2         : in std_ulogic_vector(XLEN-1 downto 0);
+            scal1         : in std_ulogic_vector(XLEN-1 downto 0);
+            start         : in std_ulogic;
+            vmask         : in std_ulogic_vector(VLEN-1 downto 0);
+            vcsr          : in vcsr_t;
+            vrf_vs2_rdata : in std_ulogic_vector(VLEN-1 downto 0);
+            vrf_vs1_rdata : in std_ulogic_vector(VLEN-1 downto 0);
+            vrf_vd_rdata  : in std_ulogic_vector(VLEN-1 downto 0);
+            mem_ack       : in std_ulogic;
+            mem_rdata     : in std_ulogic_vector(VLSU_MEM_W-1 downto 0);
+            vlsu_seq      : out vlsu_seq_if_t;
+            seqend        : out std_ulogic;
+            result        : out std_ulogic_vector(XLEN-1 downto 0)
+        );
+    end component neorv32_vlsu;
+
+    component neorv32_vmockmem is
+        port(
+            clk   : in std_ulogic;
+            rst   : in std_ulogic;
+            strb  : in std_ulogic;
+            rw    : in std_ulogic;
+            addr  : in std_ulogic_vector(XLEN-1 downto 0);
+            wdata : in std_ulogic_vector(VLSU_MEM_W-1 downto 0);
+            ben   : in std_ulogic_vector((VLSU_MEM_W/8)-1 downto 0);
+            ack   : out std_ulogic;
+            rdata : out std_ulogic_vector(VLSU_MEM_W-1 downto 0)
+        );
+    end component neorv32_vmockmem;
+
     ---------------------------
     --- Signal Declarations ---
     ---------------------------
@@ -129,6 +166,7 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
 
     -- Sequencers Signals --
     signal valu_seq : valu_seq_if_t;
+    signal vlsu_seq : vlsu_seq_if_t;
 
     -- V-CSR Signals --
     signal vstart : std_ulogic_vector(XLEN-1 downto 0);
@@ -161,8 +199,9 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
     signal sld_be   : std_ulogic_vector((VLEN/8)-1 downto 0);
     signal sld_done : std_ulogic;
 
-    -- LSU Signals --
-    signal lsu_out : std_ulogic_vector(VLEN-1 downto 0);
+    -- Mock Memory Signals --
+    signal mockmem_ack   : std_ulogic;
+    signal mockmem_rdata : std_ulogic_vector(VLSU_MEM_W-1 downto 0);
 
     ------------------------------------------------------------------------
     
@@ -253,6 +292,37 @@ begin
         sld_done  => sld_done
     );
 
+    vlsu: entity work.neorv32_vlsu port map (
+        clk           => clk,
+        rst           => rst,
+        vinst         => vback_ctrl.vinst,
+        scal2         => vback_ctrl.scal2,
+        scal1         => vback_ctrl.scal1,
+        start         => vback_ctrl.vlsu_start,
+        vmask         => vmask,
+        vcsr          => vcsr,
+        vrf_vs2_rdata => vs2_data,
+        vrf_vs1_rdata => vs1_data,
+        vrf_vd_rdata  => vd_data,
+        mem_ack       => mockmem_ack,
+        mem_rdata     => mockmem_rdata,
+        vlsu_seq      => vlsu_seq,
+        seqend        => vback_resp.vlsu_seqend,
+        result        => vback_resp.vlsu_result
+    );
+
+    vmockmem: entity work.neorv32_vmockmem port map (
+        clk   => clk,
+        rst   => rst,
+        strb  => vlsu_seq.mem_strb,
+        rw    => vlsu_seq.mem_rw,
+        addr  => vlsu_seq.mem_addr,
+        wdata => vlsu_seq.mem_wdata,
+        ben   => vlsu_seq.mem_ben,
+        ack   => mockmem_ack,
+        rdata => mockmem_rdata
+    );
+
     ------------------------------------
     --- V-CSR Signals Extraction ---
     ------------------------------------
@@ -312,11 +382,11 @@ begin
                 vrf_wr_data <= sld_out;
             -- V-LSU Write-Back --
             when "10" =>
-                vrf_vs2     <= (others => '0');
-                vrf_vs1     <= (others => '0');
-                vrf_vd      <= (others => '0');
-                vrf_ben     <= (others => '0'); 
-                vrf_wr_data <= lsu_out;
+                vrf_vs2     <= vlsu_seq.vrf_vs2;
+                vrf_vs1     <= vlsu_seq.vrf_vs1;
+                vrf_vd      <= vlsu_seq.vrf_vd;
+                vrf_ben     <= vlsu_seq.vrf_ben;
+                vrf_wr_data <= vlsu_seq.vrf_wdata;
             -- VS2 Write-Back (for move instruction) --
             when "11" =>
                 vrf_vs2     <= (others => '0');

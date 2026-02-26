@@ -72,9 +72,9 @@ architecture neorv32_valu_seq_rtl of neorv32_valu_seq is
     signal valu_op_i : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
 begin
 
-    ------------------------------------
+    --------------------------------
     --- V-CSR Signals Extraction ---
-    ------------------------------------
+    --------------------------------
     vstart <= vcsr.vstart;
     vl     <= vcsr.vl;
     vill   <= vcsr.vtype(XLEN-1);
