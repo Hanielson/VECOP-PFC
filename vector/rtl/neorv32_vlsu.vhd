@@ -450,8 +450,8 @@ begin
         variable wdata_8b      : std_ulogic_vector(7 downto 0);
         variable wdata_16b     : std_ulogic_vector(15 downto 0);
         variable wdata_32b     : std_ulogic_vector(31 downto 0);
-        variable wdata         : std_ulogic_vector(VLSU_CHUNK_CNT_W-1 downto 0);
-        variable byte_en       : std_ulogic_vector((VLSU_CHUNK_CNT_W/8)-1 downto 0);
+        variable wdata         : std_ulogic_vector(VLSU_MEM_W-1 downto 0);
+        variable byte_en       : std_ulogic_vector((VLSU_MEM_W/8)-1 downto 0);
     begin
         -- Defines the Chunk Select and Element Select signals --
         case data_eew is

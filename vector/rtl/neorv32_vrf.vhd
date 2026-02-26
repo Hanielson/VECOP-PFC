@@ -59,7 +59,7 @@ architecture neorv32_vrf_rtl of neorv32_vrf is
     -- Vector Register File --
     -- NOTE: 4 copies of the VRF are needed to enable implementation via BRAMs, as each BRAM supports, at most, --
     --       1R+1W at the same clock cycle (Dual Ported RAM)                                                    --
-    signal vregfile_0 : vregfile_t := init_ram("D:/UFMG/TCC/projeto/NeoRV32/vector/scripts/vrf_contents.txt");
+    signal vregfile_0 : vregfile_t := init_ram("D:/UFMG/TCC/projeto/NeoRV32/vector/scripts/vrf_contents_zero.txt");
     signal vregfile_1 : vregfile_t := vregfile_0;
     signal vregfile_2 : vregfile_t := vregfile_0;
     signal vregfile_3 : vregfile_t := vregfile_0;

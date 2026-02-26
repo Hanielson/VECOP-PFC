@@ -32,13 +32,6 @@ end neorv32_vmockmem;
 -- LINK: https://www.intel.com/content/www/us/en/docs/programmable/683082/21-3/ram-with-byte-enable-signals.html --
 -------------------------------------------------------------------------------------------------------------------
 architecture neorv32_vmockmem_rtl of neorv32_vmockmem is
-    -- Memory Parameters --
-    constant MEM_SIZE : natural := 512;
-    constant ADDR_W   : natural := natural(ceil(log2(real(MEM_SIZE))));
-    
-    -- Memory Array Type Definition --
-    type mockmem_t is array (MEM_SIZE-1 downto 0) of std_ulogic_vector(VLSU_MEM_W-1 downto 0);
-
     impure function init_ram(file_name: string) return mockmem_t is
         file     init_file   : text;
         variable line_buffer : line;

@@ -169,10 +169,21 @@ package neorv32_vpackage is
     constant vop_store     : std_ulogic_vector(6 downto 0) := "0100111";
     constant vop_arith_cfg : std_ulogic_vector(6 downto 0) := "1010111";
 
+    -----------------------------------------
     --- VRF Register File Type Definition ---
+    -----------------------------------------
     type vregfile_t is array ((2**VREF_ADDR_WIDTH)-1 downto 0) of std_ulogic_vector(VLEN-1 downto 0);
 
+    --------------------------------------------------
+    --- Mock Memory Parameters and Type Definition ---
+    --------------------------------------------------
+    constant MEM_SIZE : natural := 512;
+    constant ADDR_W   : natural := natural(ceil(log2(real(MEM_SIZE))));
+    type mockmem_t is array (MEM_SIZE-1 downto 0) of std_ulogic_vector(VLSU_MEM_W-1 downto 0);
+
+    --------------------------------------------------------
     --- VSEW Interpreted/Expanded Vector Type Definition ---
+    --------------------------------------------------------
     type expand_t is array (natural range <>) of std_ulogic_vector;
 
     ----------------------------

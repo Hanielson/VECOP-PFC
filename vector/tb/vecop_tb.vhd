@@ -36,6 +36,11 @@ architecture tb of vecop_tb is
     signal VQ_FULL     : std_ulogic;
     signal VQ_EMPTY    : std_ulogic;
 
+    type lsu_access_mode_t is (UNIT_STRIDE, CONSTANT_STRIDE);
+
+    signal RUN_ALU_TEST : boolean := FALSE;
+    signal RUN_LSU_TEST : boolean := TRUE;
+
     procedure send_instruction(signal full : in std_ulogic; signal valid : out std_ulogic) is
     begin
         valid <= '1';
@@ -47,6 +52,23 @@ architecture tb of vecop_tb is
         valid <= '0';
         wait for 40 ns;
     end procedure send_instruction;
+
+    procedure send_instruction_and_wait(signal empty : in std_ulogic; signal valid : out std_ulogic) is
+    begin
+        -- Send Instruction to FIFO and wait for it to complete (FIFO empty again) --
+        while (empty = '0') loop
+            wait for 20 ns;
+        end loop;
+        -- Send out the instruction to the V-IQ FIFO --
+        valid <= '1';
+        wait for 20 ns;
+        valid <= '0';
+        wait for 20 ns;
+        -- Wait until the instruction is completed by checking FIFO status --
+        while (empty = '0') loop
+            wait for 20 ns;
+        end loop;
+    end procedure send_instruction_and_wait;
 
     procedure check_result_alu(
         constant LMUL      : in integer;
@@ -175,19 +197,8 @@ architecture tb of vecop_tb is
         end loop;
 
         -- Send Instruction to FIFO and wait for it to complete (FIFO empty again) --
-        -- TODO: add support for FIFO backpressure       --
-        while (viq_empty = '0') loop
-            wait for 20 ns;
-        end loop;
-        -- Send out the instruction to the V-IQ FIFO --
-        instr_valid <= '1';
-        wait for 20 ns;
-        instr_valid <= '0';
-        wait for 20 ns;
-        -- Wait until the instruction is completed by checking FIFO status --
-        while (viq_empty = '0') loop
-            wait for 20 ns;
-        end loop;
+        -- TODO: add support for FIFO backpressure --
+        send_instruction_and_wait(viq_empty, instr_valid);
 
         -- Classify the instructions according to Destination Effective LMUL (EMUL), if it is Widening and/or Multi-Width --
         case alu_op is
@@ -371,6 +382,99 @@ architecture tb of vecop_tb is
             wait for 80 ns;
         end loop;
     end procedure test_alu;
+
+    procedure test_lsu(
+        constant LMUL        : in  integer;
+        constant VSEW        : in  integer;
+        constant access_mode : in  lsu_access_mode_t;
+        constant lsu_width   : in  integer;
+        constant load        : in  boolean;
+        constant store       : in  boolean;
+        signal   vregfile    : in  vregfile_t;
+        signal   viq_full    : in  std_ulogic;
+        signal   viq_empty   : in  std_ulogic;
+        signal   instruction : out std_ulogic_vector(XLEN-1 downto 0);
+        signal   scal2       : out std_ulogic_vector(XLEN-1 downto 0);
+        signal   scal1       : out std_ulogic_vector(XLEN-1 downto 0);
+        signal   instr_valid : out std_ulogic
+    ) is
+        -- Random Number Generator --
+        variable RV : RandomPType;
+
+        -- Instruction Fields --
+        variable nf          : std_ulogic_vector(2 downto 0);
+        variable mew         : std_ulogic;
+        variable mop         : std_ulogic_vector(1 downto 0);
+        variable vm          : std_ulogic;
+        variable sumop       : std_ulogic_vector(4 downto 0);
+        variable rs1         : std_ulogic_vector(4 downto 0);
+        variable encod_width : std_ulogic_vector(2 downto 0);
+        variable base_vreg   : std_ulogic_vector(4 downto 0);
+        variable opcode      : std_ulogic_vector(6 downto 0);
+    begin
+
+        -- Initialize seed for random number generator --
+        RV.InitSeed(RV'instance_name);
+
+        ------------------------------------
+        -- Instruction Fields Definitions --
+        ------------------------------------
+        -- TODO: add support for more values for all fields --
+        nf  := (others => '0');
+        mew := '0';
+        -- Define Memory Access Mode --
+        case access_mode is
+            when UNIT_STRIDE     => mop := "00";
+            when CONSTANT_STRIDE => mop := "10";
+            when others          => mop := (others => '0');
+        end case;
+        vm    := '0';
+        sumop := (others => '0');
+        rs1   := (others => '0');
+        -- Define Instruction Encoded Width --
+        case lsu_width is
+            when 8      => encod_width := "000"; 
+            when 16     => encod_width := "101"; 
+            when 32     => encod_width := "110"; 
+            when others => encod_width := (others => '0'); 
+        end case;
+        -- Define Vector Register from/to which we will store/load the data --
+        base_vreg := std_ulogic_vector(to_unsigned(RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1), VREF_ADDR_WIDTH));
+        -- Define OPCODE based on type of access (LOAD/STORE) --
+        if (load) then
+            opcode := vop_load;
+        elsif (store) then
+            opcode := vop_store;
+        else
+            report "TEST LSU -- operation type (LOAD/STORE) was not specified" severity error;
+        end if;
+            
+        -- Construct the instruction word --
+        instruction <= nf & mew & mop & vm & sumop & rs1 & encod_width & base_vreg & opcode;
+
+        -- Calculate Stride and Memory Start Address --
+        case lsu_width is
+            when 8 =>
+                scal2 <= std_ulogic_vector(to_unsigned(1, scal2'length));
+                scal1 <= std_ulogic_vector(to_unsigned(0, scal1'length));
+
+            when 16 =>
+                scal2 <= std_ulogic_vector(to_unsigned(2, scal2'length));
+                scal1 <= std_ulogic_vector(to_unsigned(0, scal1'length));
+
+            when 32 =>
+                scal2 <= std_ulogic_vector(to_unsigned(4, scal2'length));
+                scal1 <= std_ulogic_vector(to_unsigned(0, scal1'length));
+
+            when others =>
+                scal2 <= std_ulogic_vector(to_unsigned(0, scal2'length));
+                scal1 <= std_ulogic_vector(to_unsigned(0, scal1'length));
+        end case;
+
+        -- Send Instruction to FIFO and wait for it to complete (FIFO empty again) --
+        -- TODO: add support for FIFO backpressure --
+        send_instruction_and_wait(viq_empty, instr_valid);
+    end procedure test_lsu;
 begin
 
     CLK <= not CLK after 10 ns;
@@ -388,6 +492,7 @@ begin
 
     stimuli: process
         alias vregfile : vregfile_t is << signal .vecop_tb.vecop.vrf.vregfile_0 : vregfile_t >>;
+        alias mockmem  : mockmem_t is << signal .vecop_tb.vecop.vmockmem.mockmem : mockmem_t >>;
     begin
 
         RST <= '0';
@@ -401,7 +506,14 @@ begin
         --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
         VINST <= "0" & "00000000000" & "00000" & "111" & "11111" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
-        test_alu(1, 8, vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
+
+        if (RUN_ALU_TEST) then
+            test_alu(1, 8, vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
+        end if;
+
+        if (RUN_LSU_TEST) then
+            test_lsu(1, 8, UNIT_STRIDE, 8, TRUE, FALSE, vregfile, VQ_FULL, VQ_EMPTY, VINST, SCAL1, SCAL2, VINST_VALID);
+        end if;
 
         --------------------------------------------------------------------------------------------
         --------------------------------------------------------------------------------------------
@@ -411,7 +523,10 @@ begin
         --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
         VINST <= "0" & "00000001000" & "00000" & "111" & "11111" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
-        test_alu(1, 16, vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
+
+        if (RUN_ALU_TEST) then
+            test_alu(1, 16, vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
+        end if;
 
         --------------------------------------------------------------------------------------------
         --------------------------------------------------------------------------------------------
@@ -421,7 +536,14 @@ begin
         --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
         VINST <= "0" & "00000010000" & "00000" & "111" & "11111" & "1010111";
         send_instruction(VQ_FULL, VINST_VALID);
-        test_alu(1, 32, vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
+
+        if (RUN_ALU_TEST) then
+            test_alu(1, 32, vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
+        end if;
+
+        --------------------------------------------------------------------------------------------
+        --------------------------------------------------------------------------------------------
+        --------------------------------------------------------------------------------------------
 
         while (VQ_EMPTY = '0') loop
             wait for 20 ns;
