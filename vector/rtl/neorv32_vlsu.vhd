@@ -154,15 +154,18 @@ begin
     --- V-LSU State Machine => Sequential Logic ---
     -----------------------------------------------
     process(clk, rst)
-        variable mop_invalid   : std_ulogic;
-        variable sew_ratio     : std_ulogic_vector(2 downto 0);
-        variable sew_invalid   : std_ulogic;
-        variable emul_invalid  : std_ulogic;
-        variable vlmul_off     : integer;
-        variable unit_stride   : natural;
-        variable addr_src      : std_ulogic_vector(mem_addr'length downto 0);
-        variable nxt_addr      : std_ulogic_vector(mem_addr'length downto 0);
-        variable addr_offset   : std_ulogic_vector(mem_addr'length-1 downto 0);
+        variable mop_invalid     : std_ulogic;
+        variable sew_ratio       : std_ulogic_vector(2 downto 0);
+        variable sew_invalid     : std_ulogic;
+        variable emul_invalid    : std_ulogic;
+        variable emul_nxt        : std_ulogic_vector(emul'range);
+        variable vreg_invalid    : std_ulogic;
+        variable addr_misaligned : std_ulogic;
+        variable vlmul_off       : integer;
+        variable unit_stride     : natural;
+        variable addr_src        : std_ulogic_vector(mem_addr'length downto 0);
+        variable nxt_addr        : std_ulogic_vector(mem_addr'length downto 0);
+        variable addr_offset     : std_ulogic_vector(mem_addr'length-1 downto 0);
     begin
         if (rst = '1') then
             state        <= IDLE;
@@ -287,7 +290,8 @@ begin
                                 when others => vlmul_off := 0; emul_invalid := '1';
                             end case;
 
-                            emul <= std_ulogic_vector(resize(signed(vlmul), emul'length) + to_signed(vlmul_off, emul'length));
+                            emul_nxt := std_ulogic_vector(resize(signed(vlmul), emul_nxt'length) + to_signed(vlmul_off, emul_nxt'length));
+                            emul <= emul_nxt;
                         
                         -- Indexed Addressing (not supported for now...) --
                         when "01" | "11" => 
@@ -306,7 +310,21 @@ begin
                             emul         <= (others => '0');
                     end case;
 
-                    if (mop_invalid = '1') or (sew_invalid = '1') or (emul_invalid = '1') then
+                    -- Check if register specifier is legal for calculated EMUL --
+                    case emul_nxt is
+                        -- EMUL = 1 --
+                        when "000" => vreg_invalid := '0';
+                        -- EMUL = 2 --
+                        when "001" => vreg_invalid := '0' when (base_vreg(0) = '0') else '1';
+                        -- EMUL = 4 --
+                        when "010" => vreg_invalid := '0' when (base_vreg(1 downto 0) = "00") else '1';
+                        -- EMUL = 8 --
+                        when "011" => vreg_invalid := '0' when (base_vreg(2 downto 0) = "000") else '1';
+                        -- Unsupported EMUL --
+                        when others => vreg_invalid := '0';
+                    end case;
+
+                    if (mop_invalid = '1') or (sew_invalid = '1') or (emul_invalid = '1') or (vreg_invalid = '1') then
                         state <= INVALID;
                     else
                         -- DECODE OPCODE --
@@ -327,12 +345,6 @@ begin
 
                 -- UPDATE_ADDR => updates the memory access address according to access mode --
                 when UPDATE_ADDR =>
-                    case vinst(6 downto 0) is
-                        when vop_load  => state <= READ_MEM;
-                        when vop_store => state <= STORE_MEM;
-                        when others    => state <= INVALID;
-                    end case;
-            
                     -- Base Address and Offset Calculation --
                     case mop is
                         -- Unit-Stride --
@@ -376,7 +388,32 @@ begin
 
                     -- Address Update --
                     nxt_addr := std_ulogic_vector(signed(addr_src) + resize(signed(addr_offset), nxt_addr'length));
+
+                    -- Checks if next address if aligned or not, based on DATA_EEW --
+                    case data_eew is
+                        -- EEW = 8 bits --
+                        when "000" => addr_misaligned := '0';
+                        -- EEW = 16 bits --
+                        when "101" => addr_misaligned := '0' when (nxt_addr(0) = '0') else '1';
+                        -- EEW = 32 bits --
+                        when "110" => addr_misaligned := '0' when (nxt_addr(1 downto 0) = "00") else '1';
+                        -- INVALID EEW VALUE --
+                        when others => addr_misaligned := '0';
+                    end case;
+
+                    -- Updates mem_addr register with next memory address to be accessed --
                     mem_addr <= std_ulogic_vector(nxt_addr(nxt_addr'left-1 downto 0));
+
+                    -- Next State Logic for DECODE --
+                    if (addr_misaligned = '1') then
+                        state <= INVALID;
+                    else
+                        case vinst(6 downto 0) is
+                            when vop_load  => state <= READ_MEM;
+                            when vop_store => state <= STORE_MEM;
+                            when others    => state <= INVALID;
+                        end case;
+                    end if;
 
                 -- READ_MEM => sends read request to memory and waits for completion, registering the READ DATA and updating counters/pointers when done --
                 when READ_MEM =>
