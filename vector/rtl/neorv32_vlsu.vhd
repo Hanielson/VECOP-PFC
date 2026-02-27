@@ -139,9 +139,13 @@ begin
     process(all) begin
         -- How many elements are there in the vector register? --
         case data_eew is
+            -- EEW = 8-bits --
             when "000"  => num_elems <= std_ulogic_vector(to_unsigned(((VLEN/8)-1),  num_elems'length));
-            when "001"  => num_elems <= std_ulogic_vector(to_unsigned(((VLEN/16)-1), num_elems'length));
-            when "010"  => num_elems <= std_ulogic_vector(to_unsigned(((VLEN/32)-1), num_elems'length));
+            -- EEW = 16-bits --
+            when "101"  => num_elems <= std_ulogic_vector(to_unsigned(((VLEN/16)-1), num_elems'length));
+            -- EEW = 32-bits --
+            when "110"  => num_elems <= std_ulogic_vector(to_unsigned(((VLEN/32)-1), num_elems'length));
+            -- Unsupported EEW --
             when others => num_elems <= (others => '0');
         end case;
     end process;
@@ -334,9 +338,13 @@ begin
                         -- Unit-Stride --
                         when "00" => 
                             case data_eew is
+                                -- EEW = 8-bits --
                                 when "000"  => unit_stride := 1;
-                                when "001"  => unit_stride := 2;
-                                when "010"  => unit_stride := 4;
+                                -- EEW = 16-bits --
+                                when "101"  => unit_stride := 2;
+                                -- EEW = 32-bits --
+                                when "110"  => unit_stride := 4;
+                                -- Unsupported EEW --
                                 when others => unit_stride := 0;
                             end case;
                             -- Address Offset Calculation --> if this is the first in the segment, offset is zero. Else, offset is unit stride --
@@ -455,19 +463,19 @@ begin
     begin
         -- Defines the Chunk Select and Element Select signals --
         case data_eew is
-            -- SEW = 8 bits --
+            -- EEW = 8 bits --
             when "000" =>
                 vrf_chunk_sel := elem_counter(elem_counter'left downto 2);
                 vrf_elem_sel  := elem_counter(1 downto 0);
-            -- SEW = 16 bits --
-            when "001" =>
+            -- EEW = 16 bits --
+            when "101" =>
                 vrf_chunk_sel := elem_counter(elem_counter'left-1 downto 1);
                 vrf_elem_sel  := "0" & elem_counter(0);
-            -- SEW = 32 bits --
-            when "010" =>
+            -- EEW = 32 bits --
+            when "110" =>
                 vrf_chunk_sel := elem_counter(elem_counter'left-2 downto 0);
                 vrf_elem_sel  := "00";
-            -- INVALID SEW VALUE --
+            -- INVALID EEW VALUE --
             when others =>
                 vrf_chunk_sel := (others => '0');
                 vrf_elem_sel  := (others => '0');
@@ -497,7 +505,7 @@ begin
         wdata     := (others => '0');
         byte_en   := (others => '0');
         case data_eew is
-            -- SEW = 8 bits --
+            -- EEW = 8 bits --
             when "000" =>
                 -- Multiplexer to select the 8-bit element to be sent to memory, according to element counter --
                 case elem_sel is
@@ -516,8 +524,8 @@ begin
                     when others => null;
                 end case;
 
-            -- SEW = 16 bits --
-            when "001" =>
+            -- EEW = 16 bits --
+            when "101" =>
                 -- Multiplexer to select the 16-bit element to be sent to memory, according to element counter --
                 case elem_sel is
                     when "00"   => wdata_16b := wdata_chunk(15 downto 0);
@@ -531,8 +539,8 @@ begin
                     when others => null;
                 end case;
 
-            -- SEW = 32 bits --
-            when "010" =>
+            -- EEW = 32 bits --
+            when "110" =>
                 -- Multiplexer to select the 32-bit element to be sent to memory, according to element counter --
                 case elem_sel is
                     when "00"   => wdata_32b := wdata_chunk(31 downto 0);
