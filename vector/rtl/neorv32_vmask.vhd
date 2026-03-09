@@ -113,7 +113,17 @@ begin
                 when EXEC =>
                     state      <= DONE;
                     mask_out   <= mask_out_i;
-                    psum_accum <= psum_tree(PREFIX_STAGES)(MAX_ELEM-1);
+                    -- Prefix Sum Accumulator is only updated after all current results have been extracted... This can go over multiple cycles, depending on VSEW --
+                    case vsew is
+                        -- VSEW = 8 bits --
+                        when "000" => psum_accum <= psum_tree(PREFIX_STAGES)(MAX_ELEM-1);
+                        -- VSEW = 16 bits --
+                        when "001" => psum_accum <= psum_tree(PREFIX_STAGES)(MAX_ELEM-1) when (mul_counter(0) = '1') else psum_accum;
+                        -- VSEW = 32 bits --
+                        when "010" => psum_accum <= psum_tree(PREFIX_STAGES)(MAX_ELEM-1) when (mul_counter(1 downto 0) = "11") else psum_accum;
+                        -- INVALID VSEW --
+                        when others => psum_accum <= (others => '0');
+                    end case;
 
                 when DONE =>
                     if (valid = '0') then
