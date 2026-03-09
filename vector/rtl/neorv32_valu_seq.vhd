@@ -23,8 +23,9 @@ entity neorv32_valu_seq is
         -- Control/Status Registers --
         vcsr : in vcsr_t;
 
-        -- V-ALU Signals --
-        alu_done : in std_ulogic;
+        -- Sub-Modules Signals --
+        int_done  : in std_ulogic;
+        mask_done : in std_ulogic;
         
         -- Sequencer Control Bus --
         valu_seq : out valu_seq_if_t;
@@ -37,12 +38,12 @@ end neorv32_valu_seq;
 
 architecture neorv32_valu_seq_rtl of neorv32_valu_seq is
     -- VALU-SEQ Internal State Machine --
-    type ctrl_state_t is (IDLE, DECODE, INVALID, WAIT_READ, DISPATCH_ALU, WRITE_BACK, UPDATE_CYC, UPDATE_MUL, SEQ_DONE);
+    type ctrl_state_t is (IDLE, DECODE, INVALID, WAIT_READ, DISPATCH_INT, DISPATCH_MASK, WRITE_BACK, UPDATE_CYC, UPDATE_MUL, CLEAR_INT, CLEAR_MASK, SEQ_DONE);
     signal state : ctrl_state_t;
 
     -- Internal Cycle/Mul Counters --
-    signal cycle_count : std_ulogic_vector(2 downto 0);
-    signal mul_count   : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+    signal cyc_count : std_ulogic_vector(2 downto 0);
+    signal mul_count : std_ulogic_vector(4 downto 0);
 
     -- V-CSR Signals --
     signal vstart : std_ulogic_vector(XLEN-1 downto 0);
@@ -66,10 +67,11 @@ architecture neorv32_valu_seq_rtl of neorv32_valu_seq is
     signal src2 : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
 
     -- LMUL Internal Decoded Value --
-    signal vlmul_i : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+    signal vlmul_i : std_ulogic_vector(4 downto 0);
 
-    -- V-ALU Operation Type --
-    signal valu_op_i : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
+    -- V-ALU Operation Type and Class --
+    signal valu_op_i      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
+    signal valu_opclass_i : valu_opclass_t;
 begin
 
     --------------------------------
@@ -117,19 +119,19 @@ begin
         variable max_cycle   : std_ulogic_vector(2 downto 0);
     begin
         if (rst = '1') then
-            state       <= IDLE;
-            cycle_count <= (others => '0');
-            mul_count   <= (others => '0');
-            dest        <= (others => '0');
-            src1        <= (others => '0');
-            src2        <= (others => '0');
+            state     <= IDLE;
+            cyc_count <= (others => '0');
+            mul_count <= (others => '0');
+            dest      <= (others => '0');
+            src1      <= (others => '0');
+            src2      <= (others => '0');
         elsif rising_edge(clk) then
             case state is
                 -- IDLE Control State --
                 when IDLE =>
                     -- Resets the Cycle/Mul counters --
-                    cycle_count <= (others => '0');
-                    mul_count   <= (others => '0');
+                    cyc_count <= (others => '0');
+                    mul_count <= (others => '0');
                     -- If received a start indication, go to DECODE --
                     if (start = '1') then
                         state <= DECODE;
@@ -158,11 +160,22 @@ begin
 
                 -- WAIT VRF READ Control State --
                 -- Extra cycle needed to read from the VRF (FPGA BRAMs are Read-Synchronous)
-                when WAIT_READ => state <= DISPATCH_ALU;
+                when WAIT_READ =>
+                    case valu_opclass_i is
+                        when VALU_INTOP => state <= DISPATCH_INT;
+                        when VALU_MOP   => state <= DISPATCH_MASK;
+                        when others     => state <= INVALID;
+                    end case;
 
-                -- DISPATCH ALU Operation Control State --
-                when DISPATCH_ALU =>
-                    if (alu_done = '1') then
+                -- DISPATCH INTEGER SubModule Control State --
+                when DISPATCH_INT =>
+                    if (int_done = '1') then
+                        state <= WRITE_BACK;
+                    end if;
+
+                -- DISPATCH MASK SubModule Control State --
+                when DISPATCH_MASK =>
+                    if (mask_done = '1') then
                         state <= WRITE_BACK;
                     end if;
 
@@ -180,21 +193,25 @@ begin
                     end case;
 
                     -- If instruction needs more cycles to execute --
-                    if (cycle_count /= max_cycle) then
+                    if (cyc_count /= max_cycle) then
                         state <= UPDATE_CYC;
                     -- If another loop of execution is needed due to LMUL --
                     elsif (mul_count /= vlmul_i) then
                         state <= UPDATE_MUL;
-                    -- If all is done, then signal back to dispatcher unit... --
+                    -- If all is done, then cleanup the current status of SubModules... --
                     else
-                        state <= SEQ_DONE;
+                        case valu_opclass_i is
+                            when VALU_INTOP => state <= CLEAR_INT;
+                            when VALU_MOP   => state <= CLEAR_MASK;
+                            when others     => state <= INVALID;
+                        end case;
                     end if;
 
                 -- UPDATE CYCLE COUNTER Control State --
                 when UPDATE_CYC =>
                     state <= WAIT_READ;
                     -- Update Instruction Cycle counter --
-                    cycle_count <= std_ulogic_vector(unsigned(cycle_count) + 1);
+                    cyc_count <= std_ulogic_vector(unsigned(cyc_count) + 1);
                     -- Update Operands/Destination Pointers
                     case valu_op_i is
                         -- Multi-Width Widening Operations --
@@ -215,12 +232,20 @@ begin
                 when UPDATE_MUL =>
                     state <= WAIT_READ;
                     -- Update Counters --
-                    cycle_count <= (others => '0');
-                    mul_count   <= std_ulogic_vector(unsigned(mul_count) + 1);
-                    -- Update Operands/Destination Pointers
+                    cyc_count <= (others => '0');
+                    mul_count <= std_ulogic_vector(unsigned(mul_count) + 1);
+                    -- Update Operands/Destination Pointers --
                     dest <= std_ulogic_vector(unsigned(dest) + 1);
-                    src1 <= std_ulogic_vector(unsigned(src1) + 1);
-                    src2 <= std_ulogic_vector(unsigned(src2) + 1);
+                    if (valu_opclass_i = VALU_INTOP) then
+                        src1 <= std_ulogic_vector(unsigned(src1) + 1);
+                        src2 <= std_ulogic_vector(unsigned(src2) + 1);
+                    end if;
+
+                -- CLEAR INTEGER SubModule Control State --
+                when CLEAR_INT => state <= SEQ_DONE;
+
+                -- CLEAR MASK SubModule Control State --
+                when CLEAR_MASK => state <= SEQ_DONE;
 
                 -- Sequence Done Control State --
                 when SEQ_DONE => state <= IDLE;
@@ -248,7 +273,12 @@ begin
         variable vrf_vs1      : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
         variable vrf_vd       : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
         variable valu_op      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
-        variable valu_valid   : std_ulogic;
+        variable valu_opclass : valu_opclass_t;
+        variable vint_valid   : std_ulogic;
+        variable vint_clear   : std_ulogic;
+        variable vmask_valid  : std_ulogic;
+        variable vmask_clear  : std_ulogic;
+        variable masking_en   : std_ulogic;
     begin
         
         -- Auxiliary Variables --
@@ -261,8 +291,15 @@ begin
         vrf_vd  := dest; 
 
         -- V-ALU Control --
-        valu_op    := valu_op_i;
-        valu_valid := '0';
+        valu_op      := valu_op_i;
+        valu_opclass := valu_opclass_i;
+        vint_valid   := '0';
+        vint_clear   := '0';
+        vmask_valid  := '0';
+        vmask_clear  := '0';
+
+        -- Operand Masking Enable --
+        masking_en := vm;
 
         -- V-Dispatcher Response --
         seqend <= '0';
@@ -275,10 +312,11 @@ begin
             -- WAIT VRF READ Control State => Waiting for VRF read values --
             when WAIT_READ => null;
 
-            -- DISPATCH Operation Control State --
-            when DISPATCH_ALU =>
-                -- V-ALU Control Signals --
-                valu_valid := '1';
+            -- DISPATCH INTEGER SubModule Control State --
+            when DISPATCH_INT => vint_valid := '1';
+
+            -- DISPATCH MASK SubModule Control State --
+            when DISPATCH_MASK => vmask_valid := '1';
 
             -- WRITE BACK to VRF Control State --
             when WRITE_BACK =>
@@ -286,7 +324,7 @@ begin
                 case valu_op_i is
                     -- Narrowing Operations --
                     when valu_nsrl | valu_nsra =>
-                        if (cycle_count(0) = '1') then
+                        if (cyc_count(0) = '1') then
                             ben_i := (ben_i'length-1 downto (ben_i'length/2) => '1', others => '0');
                         else
                             ben_i := ((ben_i'length/2)-1 downto 0 => '1', others => '0');
@@ -299,6 +337,12 @@ begin
                 -- Auxiliary Variables for Byte Enable definition --
                 mask_i  := (others => '1');
 
+            -- CLEAR INTEGER SubModule Control State --
+            when CLEAR_INT => vint_clear := '1';
+
+            -- CLEAR MASK SubModule Control State --
+            when CLEAR_MASK => vmask_clear := '1';
+
             -- SEQ_DONE Control State --
             when SEQ_DONE => seqend <= '1';
             
@@ -306,8 +350,10 @@ begin
         end case;
 
         valu_seq <= (
+            cyc_count => cyc_count, mul_count => mul_count,
             vrf_vs2 => vrf_vs2, vrf_vs1 => vrf_vs1, vrf_vd => vrf_vd, vrf_ben => (ben_i and mask_i),
-            valu_op => valu_op, valu_valid => valu_valid
+            valu_op => valu_op, valu_opclass => valu_opclass, vint_valid => vint_valid, vint_clear => vint_clear, vmask_valid => vmask_valid, vmask_clear => vmask_clear,
+            masking_en => masking_en
         );
     end process;
 
@@ -318,68 +364,97 @@ begin
         case funct3 is
             -- OPIVV, OPIVX or OPIVI --
             when "000" | "100" | "011" =>
-                if    (funct6 = "000000")                       then valu_op_i <= valu_add;
-                elsif (funct6 = "000010") and (funct3 /= "011") then valu_op_i <= valu_sub;
-                elsif (funct6 = "000011") and (funct3 /= "000") then valu_op_i <= valu_rsub;
-                elsif (funct6 = "000100") and (funct3 /= "011") then valu_op_i <= valu_minu;
-                elsif (funct6 = "000101") and (funct3 /= "011") then valu_op_i <= valu_min;
-                elsif (funct6 = "000110") and (funct3 /= "011") then valu_op_i <= valu_maxu;
-                elsif (funct6 = "000111") and (funct3 /= "011") then valu_op_i <= valu_max;
-                elsif (funct6 = "001001")                       then valu_op_i <= valu_and;
-                elsif (funct6 = "001010")                       then valu_op_i <= valu_or;
-                elsif (funct6 = "001011")                       then valu_op_i <= valu_xor;
-                elsif (funct6 = "010000")                       then valu_op_i <= valu_adc;
-                elsif (funct6 = "010001")                       then valu_op_i <= valu_madc;
-                elsif (funct6 = "010010") and (funct3 /= "011") then valu_op_i <= valu_sbc;
-                elsif (funct6 = "010011") and (funct3 /= "011") then valu_op_i <= valu_msbc;
-                elsif (funct6 = "010111")                       then valu_op_i <= valu_merge;
-                elsif (funct6 = "011000")                       then valu_op_i <= valu_se;
-                elsif (funct6 = "011001")                       then valu_op_i <= valu_sne;
-                elsif (funct6 = "011010") and (funct3 /= "011") then valu_op_i <= valu_sltu;
-                elsif (funct6 = "011011") and (funct3 /= "011") then valu_op_i <= valu_slt;
-                elsif (funct6 = "011100")                       then valu_op_i <= valu_sleu;
-                elsif (funct6 = "011101")                       then valu_op_i <= valu_sle;
-                elsif (funct6 = "011110") and (funct3 /= "000") then valu_op_i <= valu_sgtu;
-                elsif (funct6 = "011111") and (funct3 /= "000") then valu_op_i <= valu_sgt;
-                elsif (funct6 = "100101")                       then valu_op_i <= valu_sll;
-                elsif (funct6 = "101000")                       then valu_op_i <= valu_srl;
-                elsif (funct6 = "101001")                       then valu_op_i <= valu_sra;
-                elsif (funct6 = "101100")                       then valu_op_i <= valu_nsrl;
-                elsif (funct6 = "101101")                       then valu_op_i <= valu_nsra;
+                if    (funct6 = "000000")                       then valu_op_i <= valu_add  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "000010") and (funct3 /= "011") then valu_op_i <= valu_sub  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "000011") and (funct3 /= "000") then valu_op_i <= valu_rsub ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "000100") and (funct3 /= "011") then valu_op_i <= valu_minu ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "000101") and (funct3 /= "011") then valu_op_i <= valu_min  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "000110") and (funct3 /= "011") then valu_op_i <= valu_maxu ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "000111") and (funct3 /= "011") then valu_op_i <= valu_max  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "001001")                       then valu_op_i <= valu_and  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "001010")                       then valu_op_i <= valu_or   ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "001011")                       then valu_op_i <= valu_xor  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "010000")                       then valu_op_i <= valu_adc  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "010001")                       then valu_op_i <= valu_madc ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "010010") and (funct3 /= "011") then valu_op_i <= valu_sbc  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "010011") and (funct3 /= "011") then valu_op_i <= valu_msbc ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "010111")                       then valu_op_i <= valu_merge; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "011000")                       then valu_op_i <= valu_se   ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "011001")                       then valu_op_i <= valu_sne  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "011010") and (funct3 /= "011") then valu_op_i <= valu_sltu ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "011011") and (funct3 /= "011") then valu_op_i <= valu_slt  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "011100")                       then valu_op_i <= valu_sleu ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "011101")                       then valu_op_i <= valu_sle  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "011110") and (funct3 /= "000") then valu_op_i <= valu_sgtu ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "011111") and (funct3 /= "000") then valu_op_i <= valu_sgt  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "100101")                       then valu_op_i <= valu_sll  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "101000")                       then valu_op_i <= valu_srl  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "101001")                       then valu_op_i <= valu_sra  ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "101100")                       then valu_op_i <= valu_nsrl ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "101101")                       then valu_op_i <= valu_nsra ; valu_opclass_i <= VALU_INTOP;
                 -- INVALID FUNCT6 --
                 else
-                    valu_op_i <= valu_invalid;
+                    valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP;
                 end if;
 
             -- OPMVV or OPMVX --
             when "010" | "110" =>
-                if (funct6 = "010010") then
-                    if    (vs1 = "00100") then valu_op_i <= valu_zext_vf4;
-                    elsif (vs1 = "00101") then valu_op_i <= valu_sext_vf4;
-                    elsif (vs1 = "00110") then valu_op_i <= valu_zext_vf2;
-                    elsif (vs1 = "00111") then valu_op_i <= valu_sext_vf2;
+                -- VWXUNARY0 --
+                if (funct6 = "010000") and (funct3 = "010") then
+                    if    (vs1 = "00000") then valu_op_i <= valu_mvxs ; valu_opclass_i <= VALU_MOP;
+                    elsif (vs1 = "10000") then valu_op_i <= valu_cpop ; valu_opclass_i <= VALU_MOP;
+                    elsif (vs1 = "10001") then valu_op_i <= valu_first; valu_opclass_i <= VALU_MOP;
                     -- INVALID SOURCE_1 --
                     else
-                        valu_op_i <= valu_invalid;
+                        valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP;
                     end if;
-                elsif (funct6 = "110000") then valu_op_i <= valu_waddu;
-                elsif (funct6 = "110001") then valu_op_i <= valu_wadd;
-                elsif (funct6 = "110010") then valu_op_i <= valu_wsubu;
-                elsif (funct6 = "110011") then valu_op_i <= valu_wsub;
-                elsif (funct6 = "110100") then valu_op_i <= valu_waddu_2sew;
-                elsif (funct6 = "110101") then valu_op_i <= valu_wadd_2sew;
-                elsif (funct6 = "110110") then valu_op_i <= valu_wsubu_2sew;
-                elsif (funct6 = "110111") then valu_op_i <= valu_wsub_2sew;
+                -- VXUNARY0 --
+                elsif (funct6 = "010010") and (funct3 = "010") then
+                    if    (vs1 = "00100") then valu_op_i <= valu_zext_vf4; valu_opclass_i <= VALU_INTOP;
+                    elsif (vs1 = "00101") then valu_op_i <= valu_sext_vf4; valu_opclass_i <= VALU_INTOP;
+                    elsif (vs1 = "00110") then valu_op_i <= valu_zext_vf2; valu_opclass_i <= VALU_INTOP;
+                    elsif (vs1 = "00111") then valu_op_i <= valu_sext_vf2; valu_opclass_i <= VALU_INTOP;
+                    -- INVALID SOURCE_1 --
+                    else
+                        valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP;
+                    end if;
+                -- VMUNARY0 --
+                elsif (funct6 = "010100") and (funct3 = "010") then
+                    if    (vs1 = "00001") then valu_op_i <= valu_msbf; valu_opclass_i <= VALU_MOP;
+                    elsif (vs1 = "00010") then valu_op_i <= valu_msof; valu_opclass_i <= VALU_MOP;
+                    elsif (vs1 = "00011") then valu_op_i <= valu_msif; valu_opclass_i <= VALU_MOP;
+                    elsif (vs1 = "10000") then valu_op_i <= valu_iota; valu_opclass_i <= VALU_MOP;
+                    elsif (vs1 = "10001") then valu_op_i <= valu_id  ; valu_opclass_i <= VALU_MOP;
+                    -- INVALID SOURCE_1 --
+                    else
+                        valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP;
+                    end if;
+                elsif (funct6 = "011000") and (funct3 = "010") then valu_op_i <= valu_mandn     ; valu_opclass_i <= VALU_MOP;
+                elsif (funct6 = "011001") and (funct3 = "010") then valu_op_i <= valu_mand      ; valu_opclass_i <= VALU_MOP;
+                elsif (funct6 = "011010") and (funct3 = "010") then valu_op_i <= valu_mor       ; valu_opclass_i <= VALU_MOP;
+                elsif (funct6 = "011011") and (funct3 = "010") then valu_op_i <= valu_mxor      ; valu_opclass_i <= VALU_MOP;
+                elsif (funct6 = "011100") and (funct3 = "010") then valu_op_i <= valu_morn      ; valu_opclass_i <= VALU_MOP;
+                elsif (funct6 = "011101") and (funct3 = "010") then valu_op_i <= valu_mnand     ; valu_opclass_i <= VALU_MOP;
+                elsif (funct6 = "011110") and (funct3 = "010") then valu_op_i <= valu_mnor      ; valu_opclass_i <= VALU_MOP;
+                elsif (funct6 = "011111") and (funct3 = "010") then valu_op_i <= valu_mxnor     ; valu_opclass_i <= VALU_MOP;
+                elsif (funct6 = "110000")                      then valu_op_i <= valu_waddu     ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "110001")                      then valu_op_i <= valu_wadd      ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "110010")                      then valu_op_i <= valu_wsubu     ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "110011")                      then valu_op_i <= valu_wsub      ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "110100")                      then valu_op_i <= valu_waddu_2sew; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "110101")                      then valu_op_i <= valu_wadd_2sew ; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "110110")                      then valu_op_i <= valu_wsubu_2sew; valu_opclass_i <= VALU_INTOP;
+                elsif (funct6 = "110111")                      then valu_op_i <= valu_wsub_2sew ; valu_opclass_i <= VALU_INTOP;
                 -- INVALID FUNCT6 --
                 else
-                    valu_op_i <= valu_invalid;
+                    valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP;
                 end if;
 
             -- OPFVV or OPFVF --
-            when "001" | "101" => valu_op_i <= valu_invalid;
+            when "001" | "101" => valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP;
 
             -- INVALID FUNCT3 --
-            when others => valu_op_i <= valu_invalid;
+            when others => valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP;
         end case;
     end process;
 

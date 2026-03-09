@@ -65,36 +65,28 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
         );
     end component neorv32_vrf;
 
-    component neorv32_valu_seq is
-        port(
-            clk      : in std_ulogic;
-            rst      : in std_ulogic;
-            vinst    : in std_ulogic_vector(XLEN-1 downto 0);
-            scal2    : in std_ulogic_vector(XLEN-1 downto 0);
-            scal1    : in std_ulogic_vector(XLEN-1 downto 0);
-            start    : in std_ulogic;
-            vmask    : in std_ulogic_vector(VLEN-1 downto 0);
-            vcsr     : in vcsr_t;
-            alu_done : in std_ulogic;
-            valu_seq : out valu_seq_if_t;
-            seqend   : out std_ulogic;
-            result   : out std_ulogic_vector(XLEN-1 downto 0)
-        );
-    end component neorv32_valu_seq;
-
     component neorv32_valu is
         port(
-            clk      : in std_ulogic;
-            rst      : in std_ulogic;
-            alu_op   : in std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
-            valid    : in std_ulogic;
-            op2      : in std_ulogic_vector(VLEN-1 downto 0);
-            op1      : in std_ulogic_vector(VLEN-1 downto 0);
-            op0      : in std_ulogic_vector(VLEN-1 downto 0);
-            vmask    : in std_ulogic_vector(VALU_CHUNK_W-1 downto 0);
-            vsew     : in std_ulogic_vector(2 downto 0);
-            alu_out  : out std_ulogic_vector(VLEN-1 downto 0);
-            alu_done : out std_ulogic
+            clk           : in std_ulogic;
+            rst           : in std_ulogic;
+            vinst         : in std_ulogic_vector(XLEN-1 downto 0);
+            scal2         : in std_ulogic_vector(XLEN-1 downto 0);
+            scal1         : in std_ulogic_vector(XLEN-1 downto 0);
+            start         : in std_ulogic;
+            osel_imm      : std_ulogic_vector(4 downto 0);
+            osel_sel_op2  : std_ulogic;
+            osel_sel_op1  : std_ulogic;
+            osel_sel_imm  : std_ulogic;
+            osel_scalar   : std_ulogic_vector(XLEN-1 downto 0);
+            vmask         : in std_ulogic_vector(VLEN-1 downto 0);
+            vcsr          : in vcsr_t;
+            vrf_vs2_rdata : in std_ulogic_vector(VLEN-1 downto 0);
+            vrf_vs1_rdata : in std_ulogic_vector(VLEN-1 downto 0);
+            vrf_vd_rdata  : in std_ulogic_vector(VLEN-1 downto 0);
+            valu_seq      : out valu_seq_if_t;
+            valu_out      : out std_ulogic_vector(VLEN-1 downto 0);
+            seqend        : out std_ulogic;
+            result        : out std_ulogic_vector(XLEN-1 downto 0)
         );
     end component neorv32_valu;
 
@@ -186,13 +178,9 @@ architecture neorv32_vecop_rtl of neorv32_vecop is
     signal vs2_data     : std_ulogic_vector(VLEN-1 downto 0);
     signal vs1_data     : std_ulogic_vector(VLEN-1 downto 0);
     signal vd_data      : std_ulogic_vector(VLEN-1 downto 0);
-    
-    -- ALU Signals --
-    signal op2      : std_ulogic_vector(VLEN-1 downto 0);
-    signal op1      : std_ulogic_vector(VLEN-1 downto 0);
-    signal op0      : std_ulogic_vector(VLEN-1 downto 0);
-    signal alu_out  : std_ulogic_vector(VLEN-1 downto 0);
-    signal alu_done : std_ulogic;
+
+    -- V-ALU Signals --
+    signal valu_out : std_ulogic_vector(VLEN-1 downto 0);
 
     -- SLD Signals --
     signal sld_out  : std_ulogic_vector(VLEN-1 downto 0);
@@ -215,6 +203,17 @@ begin
     -- xor_vs2_out <= xor vs2_data;
     -- xor_vs1_out <= xor vs1_data;
     -- xor_vd_out  <= xor vd_data;
+
+    ------------------------------------
+    --- V-CSR Signals Extraction ---
+    ------------------------------------
+    vstart <= vcsr.vstart;
+    vl     <= vcsr.vl;
+    vill   <= vcsr.vtype(XLEN-1);
+    vma    <= vcsr.vtype(7);
+    vta    <= vcsr.vtype(6);
+    vsew   <= vcsr.vtype(5 downto 3);
+    vlmul  <= vcsr.vtype(2 downto 0);
 
     ----------------------------------
     --- Sub-Modules Instantiations ---
@@ -248,33 +247,27 @@ begin
         vmask   => vmask
     );
 
-    valu_seq_top: entity work.neorv32_valu_seq port map(
-        clk      => clk,
-        rst      => rst,
-        vinst    => vback_ctrl.vinst,
-        scal2    => vback_ctrl.scal2,
-        scal1    => vback_ctrl.scal1,
-        start    => vback_ctrl.valu_start,
-        vmask    => vmask,
-        vcsr     => vcsr,
-        alu_done => alu_done,
-        valu_seq => valu_seq,
-        seqend   => vback_resp.valu_seqend,
-        result   => vback_resp.valu_result
-    );
-
-    valu: entity work.neorv32_valu port map (
-        clk      => clk,
-        rst      => rst,
-        alu_op   => valu_seq.valu_op,
-        valid    => valu_seq.valu_valid,
-        op2      => op2,
-        op1      => op1,
-        op0      => op0,
-        vmask    => vmask(VALU_CHUNK_W-1 downto 0),
-        vsew     => vsew,
-        alu_out  => alu_out,
-        alu_done => alu_done
+    valu: entity work.neorv32_valu port map(
+        clk           => clk,
+        rst           => rst,
+        vinst         => vback_ctrl.vinst,
+        scal2         => vback_ctrl.scal2,
+        scal1         => vback_ctrl.scal1,
+        start         => vback_ctrl.valu_start,
+        osel_imm      => vback_ctrl.osel_imm,
+        osel_sel_op2  => vback_ctrl.osel_sel_op2,
+        osel_sel_op1  => vback_ctrl.osel_sel_op1,
+        osel_sel_imm  => vback_ctrl.osel_sel_imm,
+        osel_scalar   => vback_ctrl.osel_scalar,
+        vmask         => vmask,
+        vcsr          => vcsr,
+        vrf_vs2_rdata => vs2_data,
+        vrf_vs1_rdata => vs1_data,
+        vrf_vd_rdata  => vd_data,
+        valu_seq      => valu_seq,
+        valu_out      => valu_out,
+        seqend        => vback_resp.valu_seqend,
+        result        => vback_resp.valu_result
     );
 
     vsld: entity work.neorv32_vsld port map (
@@ -323,17 +316,6 @@ begin
         rdata => mockmem_rdata
     );
 
-    ------------------------------------
-    --- V-CSR Signals Extraction ---
-    ------------------------------------
-    vstart <= vcsr.vstart;
-    vl     <= vcsr.vl;
-    vill   <= vcsr.vtype(XLEN-1);
-    vma    <= vcsr.vtype(7);
-    vta    <= vcsr.vtype(6);
-    vsew   <= vcsr.vtype(5 downto 3);
-    vlmul  <= vcsr.vtype(2 downto 0);
-
     -------------------
     --- V-CSR Logic ---
     -------------------
@@ -372,7 +354,7 @@ begin
                 vrf_vs1     <= valu_seq.vrf_vs1;
                 vrf_vd      <= valu_seq.vrf_vd;
                 vrf_ben     <= valu_seq.vrf_ben;
-                vrf_wr_data <= alu_out;
+                vrf_wr_data <= valu_out;
             -- V-SLD Write-Back --
             when "01" =>
                 vrf_vs2     <= (others => '0');
@@ -402,34 +384,4 @@ begin
                 vrf_wr_data <= (others => '0');
         end case;
     end process VRF_MUX;
-
-    --------------------
-    --- OP-SEL Logic ---
-    --------------------
-    OP_SEL : process(all) 
-        variable imm_scl : std_ulogic_vector(VLEN-1 downto 0);
-    begin
-        op2 <= vs2_data when (vback_ctrl.osel_sel_op2 = '0') else vd_data;
-        op0 <= vs2_data when (vback_ctrl.osel_sel_op2 = '1') else vd_data;
-        for ii in 0 to ((VLEN / 8) - 1) loop
-            -- Select SCALAR --
-            if (vback_ctrl.osel_sel_imm = '1') then
-                case vsew is
-                    when "000"  => imm_scl(8*ii+7 downto 8*ii) := vback_ctrl.osel_scalar(7 downto 0);
-                    when "001"  => imm_scl(8*ii+7 downto 8*ii) := vback_ctrl.osel_scalar(8*(ii mod 2)+7 downto 8*(ii mod 2));
-                    when "010"  => imm_scl(8*ii+7 downto 8*ii) := vback_ctrl.osel_scalar(8*(ii mod 4)+7 downto 8*(ii mod 4));
-                    when others => imm_scl(8*ii+7 downto 8*ii) := (others => '0');
-                end case;
-            -- Select IMMEDIATE --
-            else
-                case vsew is
-                    when "000"  => imm_scl(8*ii+7 downto 8*ii) := std_ulogic_vector(resize(unsigned(vback_ctrl.osel_imm), 8));
-                    when "001"  => imm_scl(8*ii+7 downto 8*ii) := std_ulogic_vector(resize(unsigned(vback_ctrl.osel_imm), 8)) when ((ii mod 2) = 0) else (others => '0');
-                    when "010"  => imm_scl(8*ii+7 downto 8*ii) := std_ulogic_vector(resize(unsigned(vback_ctrl.osel_imm), 8)) when ((ii mod 4) = 0) else (others => '0');
-                    when others => imm_scl(8*ii+7 downto 8*ii) := (others => '0');
-                end case;
-            end if;
-        end loop;
-        op1 <= vs1_data when (vback_ctrl.osel_sel_op1 = '0') else imm_scl;
-    end process OP_SEL;
 end architecture neorv32_vecop_rtl;

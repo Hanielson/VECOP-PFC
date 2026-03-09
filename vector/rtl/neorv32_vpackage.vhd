@@ -137,16 +137,28 @@ package neorv32_vpackage is
         vlsu_trap_addr : std_ulogic_vector(XLEN-1 downto 0);
     end record;
 
+    -----------------------------
+    --- V-ALU Operation Types ---
+    -----------------------------
+    type valu_opclass_t is (VALU_INTOP, VALU_MOP, VALU_INVALOP);
+
     --------------------------------
     -- SEQUENCERS Interface Buses --
     --------------------------------
     type valu_seq_if_t is record
-        vrf_vs2    : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
-        vrf_vs1    : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
-        vrf_vd     : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
-        vrf_ben    : std_ulogic_vector((VLEN/8)-1 downto 0);
-        valu_op    : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
-        valu_valid : std_ulogic;
+        vrf_vs2      : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        vrf_vs1      : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        vrf_vd       : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
+        vrf_ben      : std_ulogic_vector((VLEN/8)-1 downto 0);
+        valu_op      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
+        valu_opclass : valu_opclass_t;
+        vint_valid   : std_ulogic;
+        vint_clear   : std_ulogic;
+        vmask_valid  : std_ulogic;
+        vmask_clear  : std_ulogic;
+        masking_en   : std_ulogic;
+        cyc_count    : std_ulogic_vector(2 downto 0);
+        mul_count    : std_ulogic_vector(4 downto 0);
     end record;
 
     type vlsu_seq_if_t is record
@@ -237,4 +249,20 @@ package neorv32_vpackage is
     constant valu_slddn      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"2D";
     constant valu_sld1up     : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"3E";
     constant valu_sld1dn     : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"3F";
+    constant valu_mandn      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"40";
+    constant valu_mand       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"41";
+    constant valu_mor        : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"42";
+    constant valu_mxor       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"43";
+    constant valu_morn       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"44";
+    constant valu_mnand      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"45";
+    constant valu_mnor       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"46";
+    constant valu_mxnor      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"47";
+    constant valu_mvxs       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"48";
+    constant valu_cpop       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"49";
+    constant valu_first      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"4A";
+    constant valu_msbf       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"4B";
+    constant valu_msof       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"4C";
+    constant valu_msif       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"4D";
+    constant valu_iota       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"4E";
+    constant valu_id         : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"4F";
 end neorv32_vpackage;
