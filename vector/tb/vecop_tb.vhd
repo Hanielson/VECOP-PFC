@@ -38,8 +38,8 @@ architecture tb of vecop_tb is
 
     type lsu_access_mode_t is (UNIT_STRIDE, CONSTANT_STRIDE);
 
-    signal RUN_ALU_TEST : boolean := FALSE;
-    signal RUN_LSU_TEST : boolean := TRUE;
+    signal RUN_ALU_TEST : boolean := TRUE;
+    signal RUN_LSU_TEST : boolean := FALSE;
 
     procedure send_instruction(signal full : in std_ulogic; signal valid : out std_ulogic) is
     begin
@@ -87,12 +87,14 @@ architecture tb of vecop_tb is
         variable shift_bits : integer;
         variable temp_2sew  : std_ulogic_vector(DEST_SEW-1 downto 0);
 
-        variable check      : expand_t((VLEN/DEST_SEW)-1 downto 0)(DEST_SEW-1 downto 0);
-        variable full_check : std_ulogic_vector(VLEN-1 downto 0);
+        variable check      : expand_t((VLEN/DEST_SEW)-1 downto 0)(DEST_SEW-1 downto 0) := (others => (others => '0'));
+        variable full_check : std_ulogic_vector(VLEN-1 downto 0)                        := (others => '0');
     begin
 
         cycle_i    := INDEX mod (DEST_LMUL/LMUL);
         shift_bits := (integer(ceil(log2(real(DEST_SEW)))) - 1);
+
+        -- Loop that constructs the check array based on instruction and operand values --
         for ii in 0 to DEST_ELEM-1 loop
             case alu_op is
                 when valu_waddu      => temp_2sew := std_ulogic_vector(resize(unsigned(vs2((cycle_i * DEST_ELEM) + ii)), DEST_SEW) + resize(unsigned(vs1((cycle_i * DEST_ELEM) + ii)), DEST_SEW));
@@ -144,10 +146,14 @@ architecture tb of vecop_tb is
                 when valu_nsra       => check(ii) := (check(ii)'range => '0');
                 when others          => check(ii) := (check(ii)'range => '0');
             end case;
+        end loop;
 
+        -- First loop needs to complete before assigning the check variable to full_check --
+        for ii in 0 to DEST_ELEM-1 loop
             full_check(ii*DEST_SEW+DEST_SEW-1 downto ii*DEST_SEW) := check(ii);
         end loop;
 
+        -- Check calculated expected value against what is read from the VRF --
         if (full_check = vd) then
             report "V-ALU Operation Check -- LMUL loop index " & integer'image(INDEX) & " -- ACTUAL: " & to_hstring(vd) & " EXPECTED: " & to_hstring(full_check) & "...PASSED";
         else
@@ -191,9 +197,9 @@ architecture tb of vecop_tb is
     begin
         -- Read operands vs2/vs1 values before dispatching the instruction (in case of destination overlap) --
         -- TODO: there can be no overflow in register address for LMUL > 1, so when generating the instruction this needs to be respected --
-        for ii in 0 to LMUL-1 loop
-            vs2_data(ii) := vregfile(vs2 + ii);
-            vs1_data(ii) := vregfile(vs1 + ii);
+        for ii in 0 to 7 loop
+            vs2_data(ii) := vregfile((vs2 + ii) mod 32);
+            vs1_data(ii) := vregfile((vs1 + ii) mod 32);
         end loop;
 
         -- Send Instruction to FIFO and wait for it to complete (FIFO empty again) --
@@ -221,7 +227,7 @@ architecture tb of vecop_tb is
             when others =>
                 DEST_LMUL     := LMUL;
                 is_multiwidth := FALSE;
-                is_widening   := TRUE;
+                is_widening   := FALSE;
         end case;
 
         -- Extract the destination value and calculate/check the operation results --
