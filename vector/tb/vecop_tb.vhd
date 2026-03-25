@@ -72,6 +72,7 @@ architecture tb of vecop_tb is
 
     procedure check_result_alu(
         constant LMUL      : in integer;
+        constant DEST_SEW  : in integer;
         constant DEST_LMUL : in integer;
         constant INDEX     : in integer;
         constant SEW       : in integer;
@@ -81,7 +82,6 @@ architecture tb of vecop_tb is
         constant vd        : in std_ulogic_vector;
         constant mask      : in std_ulogic_vector
     ) is
-        constant DEST_SEW   : integer := (SEW * (DEST_LMUL/LMUL));
         constant DEST_ELEM  : integer := (VLEN/DEST_SEW);
         variable cycle_i    : integer;
         variable shift_bits : integer;
@@ -168,6 +168,9 @@ architecture tb of vecop_tb is
         constant vs2         : in  integer;
         constant vs1         : in  integer;
         constant vd          : in  integer;
+        constant funct6      : in  std_ulogic_vector(5 downto 0);
+        constant funct3      : in  std_ulogic_vector(2 downto 0);
+        constant scalar      : in  integer;
         signal   vregfile    : in  vregfile_t;
         signal   viq_full    : in  std_ulogic;
         signal   viq_empty   : in  std_ulogic;
@@ -183,6 +186,8 @@ architecture tb of vecop_tb is
 
         variable is_multiwidth : boolean := FALSE;
         variable is_widening   : boolean := FALSE;
+        variable is_extend_vf2 : boolean := FALSE;
+        variable is_extend_vf4 : boolean := FALSE;
         variable vs2_index     : integer := 0;
         variable vs1_index     : integer := 0;
 
@@ -200,6 +205,14 @@ architecture tb of vecop_tb is
         for ii in 0 to 7 loop
             vs2_data(ii) := vregfile((vs2 + ii) mod 32);
             vs1_data(ii) := vregfile((vs1 + ii) mod 32);
+
+            for jj in 0 to (vs1_data(ii)'length/VSEW)-1 loop
+                case funct3 is
+                    when "011"                 => vs1_data(ii)(((jj*VSEW)+VSEW)-1 downto jj*VSEW) := std_ulogic_vector(to_unsigned(vs1, VSEW));
+                    when "100" | "101" | "110" => vs1_data(ii)(((jj*VSEW)+VSEW)-1 downto jj*VSEW) := std_ulogic_vector(to_unsigned(scalar, VSEW));
+                    when others                => vs1_data(ii)(((jj*VSEW)+VSEW)-1 downto jj*VSEW) := vregfile((vs1 + ii) mod 32)(((jj*VSEW)+VSEW)-1 downto jj*VSEW);
+                end case;
+            end loop;
         end loop;
 
         -- Send Instruction to FIFO and wait for it to complete (FIFO empty again) --
@@ -209,20 +222,33 @@ architecture tb of vecop_tb is
         -- Classify the instructions according to Destination Effective LMUL (EMUL), if it is Widening and/or Multi-Width --
         case alu_op is
             -- Widening Operations, but with same width operands --
-            when valu_waddu | valu_wsubu | valu_wadd | valu_wsub | valu_zext_vf2 | valu_sext_vf2 =>
+            when valu_waddu | valu_wsubu | valu_wadd | valu_wsub =>
                 DEST_LMUL     := (2 * LMUL);
                 is_multiwidth := FALSE;
                 is_widening   := TRUE;
+                is_extend_vf2 := FALSE;
+                is_extend_vf4 := FALSE;
             -- Widening Operations (2 * SEW), with different width operands --
             when valu_waddu_2sew | valu_wsubu_2sew | valu_wadd_2sew | valu_wsub_2sew =>
                 DEST_LMUL     := (2 * LMUL);
                 is_multiwidth := TRUE;
                 is_widening   := TRUE;
-            -- Widening Operations (4 * SEW), but with same width operands --
+                is_extend_vf2 := FALSE;
+                is_extend_vf4 := FALSE;
+            -- Sign Extension Operations (SEW / 2) --
+            when valu_zext_vf2 | valu_sext_vf2 =>
+                DEST_LMUL     := (2 * LMUL);
+                is_multiwidth := FALSE;
+                is_widening   := FALSE;
+                is_extend_vf2 := TRUE;
+                is_extend_vf4 := FALSE;
+            -- Sign Extension Operations (SEW / 4) --
             when valu_zext_vf4 | valu_sext_vf4 =>
                 DEST_LMUL     := (4 * LMUL);
                 is_multiwidth := FALSE;
-                is_widening   := TRUE;
+                is_widening   := FALSE;
+                is_extend_vf2 := FALSE;
+                is_extend_vf4 := TRUE;
             -- Other Operations --
             when others =>
                 DEST_LMUL     := LMUL;
@@ -259,21 +285,33 @@ architecture tb of vecop_tb is
             -- Check the result of the instruction, according to VSEW configuration and type of instruction --
             if (VSEW = 8) then
                 if (is_multiwidth) then
-                    check_result_alu(LMUL, DEST_LMUL, ii, VSEW, alu_op, vs2_type16, vs1_type8, vd_data(ii), mask);
+                    check_result_alu(LMUL, (VSEW * (DEST_LMUL/LMUL)), DEST_LMUL, ii, VSEW, alu_op, vs2_type16, vs1_type8, vd_data(ii), mask);
+                elsif (is_extend_vf2) then
+                    report "Sign Extension VF2 operations with VSEW = 8 are not supported" severity error;
+                elsif (is_extend_vf4) then
+                    report "Sign Extension VF4 operations with VSEW = 8 are not supported" severity error;
                 else
-                    check_result_alu(LMUL, DEST_LMUL, ii, VSEW, alu_op, vs2_type8, vs1_type8, vd_data(ii), mask);
+                    check_result_alu(LMUL, (VSEW * (DEST_LMUL/LMUL)), DEST_LMUL, ii, VSEW, alu_op, vs2_type8, vs1_type8, vd_data(ii), mask);
                 end if;
             elsif (VSEW = 16) then
                 if (is_multiwidth) then
-                    check_result_alu(LMUL, DEST_LMUL, ii, VSEW, alu_op, vs2_type32, vs1_type16, vd_data(ii), mask);
+                    check_result_alu(LMUL, (VSEW * (DEST_LMUL/LMUL)), DEST_LMUL, ii, VSEW, alu_op, vs2_type32, vs1_type16, vd_data(ii), mask);
+                elsif (is_extend_vf2) then
+                    check_result_alu(LMUL, VSEW, DEST_LMUL, ii, VSEW, alu_op, vs2_type8, vs1_type16, vd_data(ii), mask);
+                elsif (is_extend_vf4) then
+                    report "Sign Extension VF4 operations with VSEW = 16 are not supported" severity error;
                 else
-                    check_result_alu(LMUL, DEST_LMUL, ii, VSEW, alu_op, vs2_type16, vs1_type16, vd_data(ii), mask);
+                    check_result_alu(LMUL, (VSEW * (DEST_LMUL/LMUL)), DEST_LMUL, ii, VSEW, alu_op, vs2_type16, vs1_type16, vd_data(ii), mask);
                 end if;
             elsif (VSEW = 32) then
-                if (is_multiwidth) then
+                if (is_multiwidth) or (is_widening) then
                     report "Widening operations with VSEW = 32 are not supported" severity error;
+                elsif (is_extend_vf2) then
+                    check_result_alu(LMUL, VSEW, DEST_LMUL, ii, VSEW, alu_op, vs2_type16, vs1_type32, vd_data(ii), mask);
+                elsif (is_extend_vf4) then
+                    check_result_alu(LMUL, VSEW, DEST_LMUL, ii, VSEW, alu_op, vs2_type8, vs1_type32, vd_data(ii), mask);
                 else
-                    check_result_alu(LMUL, DEST_LMUL, ii, VSEW, alu_op, vs2_type32, vs1_type32, vd_data(ii), mask);
+                    check_result_alu(LMUL, (VSEW * (DEST_LMUL/LMUL)), DEST_LMUL, ii, VSEW, alu_op, vs2_type32, vs1_type32, vd_data(ii), mask);
                 end if;
             else
                 report "Unsupported VSEW value: " & integer'image(VSEW) severity error;
@@ -294,11 +332,11 @@ architecture tb of vecop_tb is
 
         -- List of V-ALU Operations --
         type valu_op_t is array (natural range <>) of std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
-        variable valu_op_pool : valu_op_t(0 to 29) := (
+        variable valu_op_pool : valu_op_t(0 to 33) := (
             valu_add, valu_sub, valu_rsub,
             valu_waddu, valu_wsubu, valu_wadd, valu_wsub,
             valu_waddu_2sew, valu_wsubu_2sew, valu_wadd_2sew, valu_wsub_2sew,
-            -- valu_zext_vf2, valu_sext_vf2, valu_zext_vf4, valu_sext_vf4,
+            valu_zext_vf2, valu_sext_vf2, valu_zext_vf4, valu_sext_vf4,
             valu_and, valu_or, valu_xor, valu_sll, valu_srl, valu_sra,
             valu_se, valu_sne, valu_sltu, valu_slt, valu_sleu, valu_sle, valu_sgtu, valu_sgt,
             -- valu_adc, valu_madc, valu_sbc, valu_msbc,
@@ -315,6 +353,8 @@ architecture tb of vecop_tb is
         variable funct3 : std_ulogic_vector(2 downto 0);
         variable vm     : std_ulogic;
 
+        variable scalar : integer;
+
         variable vs2 : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
         variable vs1 : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
         variable vd  : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
@@ -329,61 +369,64 @@ architecture tb of vecop_tb is
         -- TODO: add support for masked operations --
         vm := '0';
 
+        -- TODO: add support for scalar operand --
+        scalar := 0;
+
         for ii in valu_op_pool'range loop
-            -- Get current operation to be tested from the pool --
-            testop := valu_op_pool(ii);
-
-            -- TODO: increase supported combination of funct6 and funct3 to test more operation types --
-            -- Operation FUNCT6 / FUNCT3 Lookup Table --
-            case testop is
-                when valu_add        => funct6 := "000000"; funct3 := "000"; opname := "VADD       ";
-                when valu_sub        => funct6 := "000010"; funct3 := "000"; opname := "VSUB       ";
-                when valu_rsub       => funct6 := "000011"; funct3 := "100"; opname := "VRSUB      ";
-                when valu_waddu      => funct6 := "110000"; funct3 := "010"; opname := "VWADDU     ";
-                when valu_wsubu      => funct6 := "110010"; funct3 := "010"; opname := "VWSUBU     ";
-                when valu_wadd       => funct6 := "110001"; funct3 := "010"; opname := "VWADD      ";
-                when valu_wsub       => funct6 := "110011"; funct3 := "010"; opname := "VWSUB      ";
-                when valu_waddu_2sew => funct6 := "110100"; funct3 := "010"; opname := "VWADDU_2SEW";
-                when valu_wsubu_2sew => funct6 := "110110"; funct3 := "010"; opname := "VWSUBU_2SEW";
-                when valu_wadd_2sew  => funct6 := "110101"; funct3 := "010"; opname := "VWADD_2SEW ";
-                when valu_wsub_2sew  => funct6 := "110111"; funct3 := "010"; opname := "VWSUB_2SEW ";
-                -- when valu_zext_vf2   => funct6 := "000000"; funct3 := "001"; opname := "VZEXT_VF2  ";
-                -- when valu_sext_vf2   => funct6 := "000000"; funct3 := "001"; opname := "VZEXT_VF2  ";
-                -- when valu_zext_vf4   => funct6 := "000000"; funct3 := "001"; opname := "VZEXT_VF2  ";
-                -- when valu_sext_vf4   => funct6 := "000000"; funct3 := "001"; opname := "VZEXT_VF2  ";
-                when valu_and        => funct6 := "001001"; funct3 := "000"; opname := "VAND       ";
-                when valu_or         => funct6 := "001010"; funct3 := "000"; opname := "VOR        ";
-                when valu_xor        => funct6 := "001011"; funct3 := "000"; opname := "VXOR       ";
-                when valu_sll        => funct6 := "100101"; funct3 := "000"; opname := "VSLL       ";
-                when valu_srl        => funct6 := "101000"; funct3 := "000"; opname := "VSRL       ";
-                when valu_sra        => funct6 := "101001"; funct3 := "000"; opname := "VSRA       ";
-                when valu_se         => funct6 := "011000"; funct3 := "000"; opname := "VSE        ";
-                when valu_sne        => funct6 := "011001"; funct3 := "000"; opname := "VSNE       ";
-                when valu_sltu       => funct6 := "011010"; funct3 := "000"; opname := "VSLTU      ";
-                when valu_slt        => funct6 := "011011"; funct3 := "000"; opname := "VSLT       ";
-                when valu_sleu       => funct6 := "011100"; funct3 := "000"; opname := "VSLEU      ";
-                when valu_sle        => funct6 := "011101"; funct3 := "000"; opname := "VSLE       ";
-                when valu_sgtu       => funct6 := "011110"; funct3 := "100"; opname := "VSGTU      ";
-                when valu_sgt        => funct6 := "011111"; funct3 := "100"; opname := "VSGT       ";
-                when valu_minu       => funct6 := "000100"; funct3 := "000"; opname := "VMINU      ";
-                when valu_min        => funct6 := "000101"; funct3 := "000"; opname := "VMIN       ";
-                when valu_maxu       => funct6 := "000110"; funct3 := "000"; opname := "VMAXU      ";
-                when valu_max        => funct6 := "000111"; funct3 := "000"; opname := "VMAX       ";
-                when valu_merge      => funct6 := "010111"; funct3 := "000"; opname := "VMERGE     ";
-                when others          => report "Selected V-ALU Operation " & to_string(testop) & " is not supported" severity error;
-            end case;
-
             -- TODO: some restriction needs to be set for widening operations and some others --
             --       that don't support overlap between source and destination registers      --
             vs2 := std_ulogic_vector(to_unsigned(RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1), VREF_ADDR_WIDTH));
             vs1 := std_ulogic_vector(to_unsigned(RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1), VREF_ADDR_WIDTH));
             vd  := std_ulogic_vector(to_unsigned(RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1), VREF_ADDR_WIDTH));
 
+            -- Get current operation to be tested from the pool --
+            testop := valu_op_pool(ii);
+
+            -- TODO: increase supported combination of funct6 and funct3 to test more operation types --
+            -- Operation FUNCT6 / FUNCT3 Lookup Table --
+            case testop is
+                when valu_add        => funct6 := "000000"; funct3 := "000"; opname := "VADD       "; vs1 := vs1;
+                when valu_sub        => funct6 := "000010"; funct3 := "000"; opname := "VSUB       "; vs1 := vs1;
+                when valu_rsub       => funct6 := "000011"; funct3 := "011"; opname := "VRSUB      "; vs1 := vs1;
+                when valu_waddu      => funct6 := "110000"; funct3 := "010"; opname := "VWADDU     "; vs1 := vs1;
+                when valu_wsubu      => funct6 := "110010"; funct3 := "010"; opname := "VWSUBU     "; vs1 := vs1;
+                when valu_wadd       => funct6 := "110001"; funct3 := "010"; opname := "VWADD      "; vs1 := vs1;
+                when valu_wsub       => funct6 := "110011"; funct3 := "010"; opname := "VWSUB      "; vs1 := vs1;
+                when valu_waddu_2sew => funct6 := "110100"; funct3 := "010"; opname := "VWADDU_2SEW"; vs1 := vs1;
+                when valu_wsubu_2sew => funct6 := "110110"; funct3 := "010"; opname := "VWSUBU_2SEW"; vs1 := vs1;
+                when valu_wadd_2sew  => funct6 := "110101"; funct3 := "010"; opname := "VWADD_2SEW "; vs1 := vs1;
+                when valu_wsub_2sew  => funct6 := "110111"; funct3 := "010"; opname := "VWSUB_2SEW "; vs1 := vs1;
+                when valu_zext_vf2   => funct6 := "010010"; funct3 := "010"; opname := "VZEXT_VF2  "; vs1 := "00110";
+                when valu_sext_vf2   => funct6 := "010010"; funct3 := "010"; opname := "VSEXT_VF2  "; vs1 := "00111";
+                when valu_zext_vf4   => funct6 := "010010"; funct3 := "010"; opname := "VZEXT_VF4  "; vs1 := "00100";
+                when valu_sext_vf4   => funct6 := "010010"; funct3 := "010"; opname := "VSEXT_VF4  "; vs1 := "00101";
+                when valu_and        => funct6 := "001001"; funct3 := "000"; opname := "VAND       "; vs1 := vs1;
+                when valu_or         => funct6 := "001010"; funct3 := "000"; opname := "VOR        "; vs1 := vs1;
+                when valu_xor        => funct6 := "001011"; funct3 := "000"; opname := "VXOR       "; vs1 := vs1;
+                when valu_sll        => funct6 := "100101"; funct3 := "000"; opname := "VSLL       "; vs1 := vs1;
+                when valu_srl        => funct6 := "101000"; funct3 := "000"; opname := "VSRL       "; vs1 := vs1;
+                when valu_sra        => funct6 := "101001"; funct3 := "000"; opname := "VSRA       "; vs1 := vs1;
+                when valu_se         => funct6 := "011000"; funct3 := "000"; opname := "VSE        "; vs1 := vs1;
+                when valu_sne        => funct6 := "011001"; funct3 := "000"; opname := "VSNE       "; vs1 := vs1;
+                when valu_sltu       => funct6 := "011010"; funct3 := "000"; opname := "VSLTU      "; vs1 := vs1;
+                when valu_slt        => funct6 := "011011"; funct3 := "000"; opname := "VSLT       "; vs1 := vs1;
+                when valu_sleu       => funct6 := "011100"; funct3 := "000"; opname := "VSLEU      "; vs1 := vs1;
+                when valu_sle        => funct6 := "011101"; funct3 := "000"; opname := "VSLE       "; vs1 := vs1;
+                when valu_sgtu       => funct6 := "011110"; funct3 := "011"; opname := "VSGTU      "; vs1 := vs1;
+                when valu_sgt        => funct6 := "011111"; funct3 := "011"; opname := "VSGT       "; vs1 := vs1;
+                when valu_minu       => funct6 := "000100"; funct3 := "000"; opname := "VMINU      "; vs1 := vs1;
+                when valu_min        => funct6 := "000101"; funct3 := "000"; opname := "VMIN       "; vs1 := vs1;
+                when valu_maxu       => funct6 := "000110"; funct3 := "000"; opname := "VMAXU      "; vs1 := vs1;
+                when valu_max        => funct6 := "000111"; funct3 := "000"; opname := "VMAX       "; vs1 := vs1;
+                when valu_merge      => funct6 := "010111"; funct3 := "000"; opname := "VMERGE     "; vs1 := vs1;
+                when others          => report "Selected V-ALU Operation " & to_string(testop) & " is not supported" severity error;
+            end case;
+
             -- Construct the instruction word --
             instruction <= funct6 & vm & vs2 & vs1 & funct3 & vd & vop_arith_cfg;
 
             report "TESTING V-ALU OPERATION: " & opname;
-            run_alu(LMUL, VSEW, testop, to_integer(unsigned(vs2)), to_integer(unsigned(vs1)), to_integer(unsigned(vd)), vregfile, viq_full, viq_empty, instr_valid);
+            run_alu(LMUL, VSEW, testop, to_integer(unsigned(vs2)), to_integer(unsigned(vs1)), to_integer(unsigned(vd)), funct6, funct3, scalar, vregfile, viq_full, viq_empty, instr_valid);
             
             wait for 80 ns;
         end loop;

@@ -43,7 +43,7 @@ architecture neorv32_valu_seq_rtl of neorv32_valu_seq is
 
     -- Internal Cycle/Mul Counters --
     signal cyc_count : std_ulogic_vector(2 downto 0);
-    signal mul_count : std_ulogic_vector(4 downto 0);
+    signal mul_count : std_ulogic_vector(2 downto 0);
 
     -- V-CSR Signals --
     signal vstart : std_ulogic_vector(XLEN-1 downto 0);
@@ -67,7 +67,14 @@ architecture neorv32_valu_seq_rtl of neorv32_valu_seq is
     signal src2 : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
 
     -- LMUL Internal Decoded Value --
-    signal vlmul_i : std_ulogic_vector(4 downto 0);
+    signal vlmul_i : std_ulogic_vector(2 downto 0);
+
+    -- Result EEW and EMUL Values --
+    signal eew  : std_ulogic_vector(2 downto 0);
+    signal emul : std_ulogic_vector(2 downto 0);
+
+    -- VRF ByteEnable Selection MUX --
+    signal ben_mux : std_ulogic_vector((VLEN/8)-1 downto 0);
 
     -- V-ALU Operation Type and Class --
     signal valu_op_i      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
@@ -101,11 +108,40 @@ begin
     ----------------------
     process(all) begin
         case vlmul is
-            when "001"  => vlmul_i <= "00001";
-            when "010"  => vlmul_i <= "00011";
-            when "011"  => vlmul_i <= "00111";
-            when others => vlmul_i <= "00000";
+            when "001"  => vlmul_i <= "001";
+            when "010"  => vlmul_i <= "011";
+            when "011"  => vlmul_i <= "111";
+            when others => vlmul_i <= "000";
         end case;
+    end process;
+
+    -------------------------------
+    --- Result's EEW Definition ---
+    -------------------------------
+    process(all) 
+        variable sew_off : natural := 0;
+    begin
+        case valu_op_i is
+            -- EEW = 2*SEW => EMUL = (LMUL >> 1) --
+            when valu_waddu | valu_wsubu | valu_wadd | valu_wsub | valu_waddu_2sew | valu_wsubu_2sew | valu_wadd_2sew | valu_wsub_2sew =>
+                sew_off := 1;
+                emul <= vlmul_i(vlmul_i'left-1 downto 0) & "1";
+            -- EEW = SEW => EMUL = (LMUL >> 1) --
+            when valu_zext_vf2 | valu_sext_vf2  =>
+                sew_off := 0;
+                emul <= vlmul_i(vlmul_i'left-1 downto 0) & "1";
+            -- EEW = SEW => EMUL = (LMUL >> 2) --
+            when valu_zext_vf4 | valu_sext_vf4 =>
+                sew_off := 0;
+                emul <= vlmul_i(vlmul_i'left-2 downto 0) & "11";
+            -- EEW = SEW => EMUL = LMUL --
+            when others =>
+                sew_off := 0;
+                emul <= vlmul_i;
+        end case;
+
+        -- Calculate EEW --
+        eew <= std_ulogic_vector(unsigned(vsew) + to_unsigned(sew_off, vsew'length));
     end process;
 
     --------------------------------------------------------------------
@@ -196,7 +232,7 @@ begin
                     if (cyc_count /= max_cycle) then
                         state <= UPDATE_CYC;
                     -- If another loop of execution is needed due to LMUL --
-                    elsif (mul_count /= vlmul_i) then
+                    elsif (mul_count /= emul) then
                         state <= UPDATE_MUL;
                     -- If all is done, then cleanup the current status of SubModules... --
                     else
@@ -210,8 +246,9 @@ begin
                 -- UPDATE CYCLE COUNTER Control State --
                 when UPDATE_CYC =>
                     state <= WAIT_READ;
-                    -- Update Instruction Cycle counter --
+                    -- Update Counters --
                     cyc_count <= std_ulogic_vector(unsigned(cyc_count) + 1);
+                    mul_count <= std_ulogic_vector(unsigned(mul_count) + 1);
                     -- Update Operands/Destination Pointers
                     case valu_op_i is
                         -- Multi-Width Widening Operations --
@@ -258,6 +295,72 @@ begin
                 when others => null;
             end case;
         end if;
+    end process;
+
+    ------------------------------------
+    --- Byte Enable Generation Logic ---
+    ------------------------------------
+    process(all)
+        -- Multiplexer to select between v0 value and ALL_ONES --
+        variable vmask_i : std_ulogic_vector(VLEN-1 downto 0);
+
+        -- Multiplexer Selection Signals --
+        variable ben_sel_sew8  : std_ulogic_vector(2 downto 0);
+        variable ben_sel_sew16 : std_ulogic;
+        variable ben_sel_sew32 : std_ulogic_vector(1 downto 0);
+
+        -- Internal Multiplexers --
+        variable ben_mux_sew8  : std_ulogic_vector((VLEN/8)-1 downto 0);
+        variable ben_mux_sew16 : std_ulogic_vector((VLEN/8)-1 downto 0);
+        variable ben_mux_sew32 : std_ulogic_vector((VLEN/8)-1 downto 0);
+    begin
+
+        -- If instruction is masked, use v0 value, otherwise use ALL_ONES
+        vmask_i := vmask when (vm = '1') else (others => '1');
+
+        -- SEW=8 MUX selects which (VLEN/8) word to generate the mask from --
+        case eew is
+            -- SEW = 8-bits--
+            when "000" => ben_sel_sew8 := mul_count;
+            -- SEW = 16-bits --
+            when "001" => ben_sel_sew8 := mul_count(mul_count'left downto 1) & "0";
+            -- SEW = 32-bits --
+            when "010" => ben_sel_sew8 := mul_count(mul_count'left downto 2) & "00";
+            -- INVALID SEW --
+            when others => ben_sel_sew8 := (others => '0');
+        end case;
+        ben_mux_sew8 := vmask_i(((to_integer(unsigned(ben_sel_sew8)) + 1) * (VLEN/8))-1 downto (to_integer(unsigned(ben_sel_sew8)) * (VLEN/8)));
+
+        -- SEW=16 MUX splits SEW=8 MUX in half --
+        ben_sel_sew16 := mul_count(0);
+        for ii in 0 to (ben_mux_sew8'length/2)-1 loop
+            case ben_sel_sew16 is
+                when '0'    => ben_mux_sew16((2*ii)+1 downto 2*ii) := std_ulogic_vector(resize(signed'(0 => ben_mux_sew8(ii))                          , 2));
+                when '1'    => ben_mux_sew16((2*ii)+1 downto 2*ii) := std_ulogic_vector(resize(signed'(0 => ben_mux_sew8(ii + (ben_mux_sew8'length/2))), 2));
+                when others => ben_mux_sew16((2*ii)+1 downto 2*ii) := (others => '0');
+            end case;
+        end loop;
+
+        -- SEW=32 MUX splits SEW=8 MUX in a quarter --
+        ben_sel_sew32 := mul_count(1 downto 0);
+        for ii in 0 to (ben_mux_sew8'length/4)-1 loop
+            case ben_sel_sew32 is
+                when "00"   => ben_mux_sew32((4*ii)+3 downto 4*ii) := std_ulogic_vector(resize(signed'(0 => ben_mux_sew8(ii))                              , 4));
+                when "01"   => ben_mux_sew32((4*ii)+3 downto 4*ii) := std_ulogic_vector(resize(signed'(0 => ben_mux_sew8(ii + (ben_mux_sew8'length/4)))    , 4));
+                when "10"   => ben_mux_sew32((4*ii)+3 downto 4*ii) := std_ulogic_vector(resize(signed'(0 => ben_mux_sew8(ii + (2*(ben_mux_sew8'length/4)))), 4));
+                when "11"   => ben_mux_sew32((4*ii)+3 downto 4*ii) := std_ulogic_vector(resize(signed'(0 => ben_mux_sew8(ii + (3*(ben_mux_sew8'length/4)))), 4));
+                when others => ben_mux_sew32((4*ii)+3 downto 4*ii) := (others => '0');
+            end case;
+        end loop;
+
+        -- Select Mask Value based on EEW --
+        case eew is
+            when "000"  => ben_mux <= ben_mux_sew8;
+            when "001"  => ben_mux <= ben_mux_sew16;
+            when "010"  => ben_mux <= ben_mux_sew32;
+            when others => ben_mux <= (others => '0');
+        end case;
+
     end process;
 
     ------------------------------
@@ -335,7 +438,7 @@ begin
                 end case;
 
                 -- Auxiliary Variables for Byte Enable definition --
-                mask_i  := (others => '1');
+                mask_i := ben_mux;
 
             -- CLEAR INTEGER SubModule Control State --
             when CLEAR_INT => vint_clear := '1';

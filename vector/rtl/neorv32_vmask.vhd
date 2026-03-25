@@ -20,7 +20,7 @@ entity neorv32_vmask is
         masking_en : in std_ulogic;
 
         -- LMUL Counter --
-        mul_counter : in std_ulogic_vector(4 downto 0);
+        mul_counter : in std_ulogic_vector(2 downto 0);
 
         -- Vector Operands --
         vmaskA : in std_ulogic_vector(VLEN-1 downto 0);

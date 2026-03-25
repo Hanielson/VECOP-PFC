@@ -158,7 +158,7 @@ package neorv32_vpackage is
         vmask_clear  : std_ulogic;
         masking_en   : std_ulogic;
         cyc_count    : std_ulogic_vector(2 downto 0);
-        mul_count    : std_ulogic_vector(4 downto 0);
+        mul_count    : std_ulogic_vector(2 downto 0);
     end record;
 
     type vlsu_seq_if_t is record
@@ -265,4 +265,5 @@ package neorv32_vpackage is
     constant valu_msif       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"4D";
     constant valu_iota       : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"4E";
     constant valu_id         : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0) := x"4F";
+    
 end neorv32_vpackage;

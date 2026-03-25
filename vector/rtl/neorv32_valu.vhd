@@ -95,7 +95,7 @@ architecture neorv32_valu_rtl of neorv32_valu is
             valid       : in std_ulogic;
             clear       : in std_ulogic;
             masking_en  : in std_ulogic;
-            mul_counter : in std_ulogic_vector(4 downto 0);
+            mul_counter : in std_ulogic_vector(2 downto 0);
             vmaskA      : in std_ulogic_vector(VLEN-1 downto 0);
             vmaskB      : in std_ulogic_vector(VLEN-1 downto 0);
             vmask_in    : in std_ulogic_vector(VALU_CHUNK_W-1 downto 0);
