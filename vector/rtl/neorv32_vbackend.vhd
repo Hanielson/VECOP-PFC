@@ -136,8 +136,11 @@ begin
         -- Auxiliary Variables --
         variable vtype_i    : std_ulogic_vector(XLEN-1 downto 0);
         variable vtype_n    : std_ulogic_vector(XLEN-1 downto 0);
+        variable vsew_n     : std_ulogic_vector(2 downto 0);
+        variable vlmul_n    : std_ulogic_vector(2 downto 0);
         variable avl        : std_ulogic_vector(XLEN-1 downto 0);
         variable vl_n       : std_ulogic_vector(XLEN-1 downto 0);
+        variable base_vlmax : natural;
         variable vlmax      : unsigned(XLEN-1 downto 0);
     begin
         -- Default Values for Control Signals --
@@ -187,23 +190,51 @@ begin
                         end if;
                 end case;
 
+                vsew_n  := vtype_i(5 downto 3);
+                vlmul_n := vtype_i(2 downto 0);
+
                 -- Check for any invalid field in proposed vtype value --
-                if  (vtype_i(2 downto 0) = "100") or (vtype_i(5) = '1') or (vtype_i(5 downto 3) = "011") or
+                if  (vlmul_n = "100") or (vtype_i(5) = '1') or (vsew_n = "011") or
                     (vtype_i(XLEN-2 downto 8) /= std_ulogic_vector(to_unsigned(0, XLEN-9))) or (vtype_i(XLEN-1) = '1') then
                     vtype_n := (XLEN-1 => '1', others => '0');
                     vl_n    := (others => '0');
                 -- If it's all good... --
                 else
                     vtype_n := vtype_i;
+
+                    -- Calculates proposed VSEW --
+                    case vsew_n is
+                        when "000"  => base_vlmax := (VLEN / 8);
+                        when "001"  => base_vlmax := (VLEN / 16);
+                        when "010"  => base_vlmax := (VLEN / 32);
+                        when others => base_vlmax := 0;
+                    end case;
+
                     -- Calculates VLMAX for the proposed VSEW configuration --
-                    if    (vtype_i(5 downto 3) = "000") then vlmax := shift_right(to_unsigned(VLEN, vlmax'length), 3);
-                    elsif (vtype_i(5 downto 3) = "001") then vlmax := shift_right(to_unsigned(VLEN, vlmax'length), 4);
-                    elsif (vtype_i(5 downto 3) = "010") then vlmax := shift_right(to_unsigned(VLEN, vlmax'length), 5);
-                    else                                     vlmax := to_unsigned(0, vlmax'length);
-                    end if;
+                    case vlmul_n is
+                        -- LMUL = 1 --
+                        when "000" => vlmax := to_unsigned(base_vlmax, vlmax'length);
+                        -- LMUL = 2 --
+                        when "001" => vlmax := shift_left(to_unsigned(base_vlmax, vlmax'length), 1);
+                        -- LMUL = 4 --
+                        when "010" => vlmax := shift_left(to_unsigned(base_vlmax, vlmax'length), 2);
+                        -- LMUL = 8 --
+                        when "011" => vlmax := shift_left(to_unsigned(base_vlmax, vlmax'length), 3);
+                        -- LMUL = 1/8 --
+                        when "101" => vlmax := shift_right(to_unsigned(base_vlmax, vlmax'length), 3);
+                        -- LMUL = 1/4 --
+                        when "110" => vlmax := shift_right(to_unsigned(base_vlmax, vlmax'length), 2);
+                        -- LMUL = 1/2 --
+                        when "111" => vlmax := shift_right(to_unsigned(base_vlmax, vlmax'length), 1);
+                        -- INVALID LMUL --
+                        when others => vlmax := to_unsigned(0, vlmax'length);
+                    end case;
+                        
                     -- Defines new vl value based on AVL and VLMAX, stripmining if necessary --
-                    if (unsigned(avl) > vlmax) then vl_n := std_ulogic_vector(resize(vlmax, vl_n'length));
-                    else                            vl_n := avl;
+                    if (unsigned(avl) > vlmax) then
+                        vl_n := std_ulogic_vector(resize(vlmax, vl_n'length));
+                    else
+                        vl_n := avl;
                     end if;
                 end if;
 

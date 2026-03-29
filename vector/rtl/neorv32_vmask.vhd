@@ -150,13 +150,13 @@ begin
     process(all) begin
         if (masking_en = '1') then
             case alu_op is
-                when valu_iota | valu_id => vmaskA_i <= (others => '1');
+                when valu_id => vmaskA_i <= (others => '1');
                 when others              => vmaskA_i <= (vmaskA and vmask_in);
             end case;
             vmaskB_i <= (vmaskB and vmask_in);
         else
             case alu_op is
-                when valu_iota | valu_id => vmaskA_i <= (others => '1');
+                when valu_id => vmaskA_i <= (others => '1');
                 when others              => vmaskA_i <= vmaskA;
             end case;
             vmaskB_i <= vmaskB;
