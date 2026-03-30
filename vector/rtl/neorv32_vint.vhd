@@ -25,7 +25,7 @@ entity neorv32_vint is
         op0 : in std_ulogic_vector(VLEN-1 downto 0);
 
         -- Vector Mask --
-        vmask : in std_ulogic_vector(VALU_CHUNK_W-1 downto 0);
+        vmask : in std_ulogic_vector((VLEN/8)-1 downto 0);
 
         -- Vector Selected Element Width --
         vsew : in std_ulogic_vector(2 downto 0);
@@ -62,7 +62,7 @@ architecture neorv32_vint_rtl of neorv32_vint is
     signal op1_i     : std_ulogic_vector(VALU_CHUNK_W-1 downto 0);
     signal op0_i     : std_ulogic_vector(VALU_CHUNK_W-1 downto 0);
     signal int_out_i : std_ulogic_vector(VALU_CHUNK_W-1 downto 0);
-    signal vmask_i   : std_ulogic_vector(VALU_CHUNK_W-1 downto 0);
+    signal vmask_i   : std_ulogic_vector((VLEN/8)-1 downto 0);
     signal vsew_i    : std_ulogic_vector(2 downto 0);
     
     -- SUM/SUB Operation Signals --
@@ -704,10 +704,10 @@ begin
     -------------------------------
     MERGE_DATAPATH: for ii in 0 to (VALU_CHUNK_W/8)-1 generate
         process(all)
-            variable merge_mask   : std_ulogic_vector(VALU_CHUNK_W-1 downto 0);
+            variable merge_mask   : std_ulogic_vector((VLEN/8)-1 downto 0);
             variable pre_sel, sel : std_ulogic;
         begin
-            merge_mask := vmask_i when (alu_op = valu_merge) else comp_out;
+            merge_mask := vmask_i when (alu_op = valu_merge) else comp_out((VLEN/8)-1 downto 0);
             pre_sel := merge_mask(ii)   when vsew_i = "000" else
                        merge_mask(ii/2) when vsew_i = "001" else
                        merge_mask(ii/4) when vsew_i = "010" else

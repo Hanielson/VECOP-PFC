@@ -171,7 +171,7 @@ begin
         op2         => op2,
         op1         => op1,
         op0         => op0,
-        vmask       => vmask(VALU_CHUNK_W-1 downto 0),
+        vmask       => valu_seq.vint_mask,
         vsew        => vsew,
         int_out     => int_out,
         int_done    => int_done

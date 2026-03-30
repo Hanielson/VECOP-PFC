@@ -154,6 +154,7 @@ package neorv32_vpackage is
         valu_opclass : valu_opclass_t;
         vint_valid   : std_ulogic;
         vint_clear   : std_ulogic;
+        vint_mask    : std_ulogic_vector((VLEN/8)-1 downto 0);
         vmask_valid  : std_ulogic;
         vmask_clear  : std_ulogic;
         masking_en   : std_ulogic;

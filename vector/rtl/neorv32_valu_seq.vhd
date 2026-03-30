@@ -76,7 +76,6 @@ architecture neorv32_valu_seq_rtl of neorv32_valu_seq is
 
     -- Result EEW and EMUL Values --
     signal eew  : std_ulogic_vector(2 downto 0);
-    signal emul : std_ulogic_vector(2 downto 0);
 
     -- VL End Indication Signal --
     signal vl_end : std_ulogic;
@@ -84,6 +83,9 @@ architecture neorv32_valu_seq_rtl of neorv32_valu_seq is
     -- VRF ByteEnable Signals --
     signal ben_mux    : std_ulogic_vector((VLEN/8)-1 downto 0);
     signal enable_ben : std_ulogic;
+
+    -- V-INT Mask Value Signal --
+    signal vint_mask : std_ulogic_vector((VLEN/8)-1 downto 0);
 
     -- V-ALU Operation Type and Class --
     signal valu_op_i      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
@@ -134,19 +136,15 @@ begin
             -- EEW = 2*SEW => EMUL = (LMUL >> 1) --
             when valu_waddu | valu_wsubu | valu_wadd | valu_wsub | valu_waddu_2sew | valu_wsubu_2sew | valu_wadd_2sew | valu_wsub_2sew =>
                 sew_off := 1;
-                emul <= vlmul_i(vlmul_i'left-1 downto 0) & "1";
             -- EEW = SEW => EMUL = (LMUL >> 1) --
             when valu_zext_vf2 | valu_sext_vf2  =>
                 sew_off := 0;
-                emul <= vlmul_i(vlmul_i'left-1 downto 0) & "1";
             -- EEW = SEW => EMUL = (LMUL >> 2) --
             when valu_zext_vf4 | valu_sext_vf4 =>
                 sew_off := 0;
-                emul <= vlmul_i(vlmul_i'left-2 downto 0) & "11";
             -- EEW = SEW => EMUL = LMUL --
             when others =>
                 sew_off := 0;
-                emul <= vlmul_i;
         end case;
 
         -- Calculate EEW --
@@ -301,7 +299,7 @@ begin
                     if (cyc_count /= max_cycle) and (vl_end = '0') then
                         state <= UPDATE_CYC;
                     -- If another loop of execution is needed due to LMUL --
-                    elsif (mul_count /= emul) and (vl_end = '0') then
+                    elsif (mul_count /= vlmul_i) and (vl_end = '0') then
                         state <= UPDATE_MUL;
                     -- If all is done, then cleanup the current status of SubModules... --
                     else
@@ -370,13 +368,26 @@ begin
     --- Byte Enable Generation Logic ---
     ------------------------------------
     process(all)
+        -- Internal Masking value due to VL configuration --
+        variable vl_mask : std_ulogic_vector((VLEN/8)-1 downto 0);
+
         -- Multiplexer to select between v0 value and ALL_ONES --
         variable vmask_i : std_ulogic_vector(VLEN-1 downto 0);
 
         -- Multiplexer Selection Signals --
-        variable ben_sel_sew8  : std_ulogic_vector(2 downto 0);
-        variable ben_sel_sew16 : std_ulogic;
-        variable ben_sel_sew32 : std_ulogic_vector(1 downto 0);
+        variable sel_sew8  : std_ulogic_vector(2 downto 0);
+        variable sel_sew16 : std_ulogic;
+        variable sel_sew32 : std_ulogic_vector(1 downto 0);
+
+        -- MUXes to extract Vector Mask to be sent to V-INT --
+        variable alum_mux_sew8  : std_ulogic_vector((VLEN/8)-1 downto 0);
+        variable alum_mux_sew16 : std_ulogic_vector((VLEN/16)-1 downto 0);
+        variable alum_mux_sew32 : std_ulogic_vector((VLEN/32)-1 downto 0);
+
+        -- Intermediary values used to apply VL Mask --
+        variable ben_mux_sew8_i  : std_ulogic_vector((VLEN/8)-1 downto 0);
+        variable ben_mux_sew16_i : std_ulogic_vector((VLEN/16)-1 downto 0);
+        variable ben_mux_sew32_i : std_ulogic_vector((VLEN/32)-1 downto 0);
 
         -- Internal Multiplexers --
         variable ben_mux_sew8  : std_ulogic_vector((VLEN/8)-1 downto 0);
@@ -384,42 +395,62 @@ begin
         variable ben_mux_sew32 : std_ulogic_vector((VLEN/8)-1 downto 0);
     begin
 
+        -- VL Mask Value Calculation --
+        vl_mask := (others => '1');
+        for ii in 0 to (VLEN/8) loop
+            -- If (elem_count = 0), all elements should be masked out --
+            if (ii = 0) and (vl_end = '1') and (unsigned(elem_count) = to_unsigned(ii, elem_count'length)) then
+                vl_mask := (others => '0');
+            -- Set all bits from 0 up to elem_count to mask out inactive elements in vector register --
+            elsif (vl_end = '1') and (unsigned(elem_count) = to_unsigned(ii, elem_count'length)) then
+                vl_mask := (others => '0');
+                -- ModelSim gives me a tantrum if I try to use others and a loop variable in the same assignment... --
+                for jj in 0 to ii-1 loop
+                    vl_mask(jj) := '1';
+                end loop;
+            end if;
+        end loop;
+
         -- If instruction is masked, use v0 value, otherwise use ALL_ONES
         vmask_i := vmask_reg when (vm = '1') else (others => '1');
 
         -- SEW=8 MUX selects which (VLEN/8) word to generate the mask from --
         case eew is
             -- SEW = 8-bits--
-            when "000" => ben_sel_sew8 := mul_count;
+            when "000" => sel_sew8 := mul_count;
             -- SEW = 16-bits --
-            when "001" => ben_sel_sew8 := mul_count(mul_count'left downto 1) & "0";
+            when "001" => sel_sew8 := "0" & mul_count(mul_count'left downto 1);
             -- SEW = 32-bits --
-            when "010" => ben_sel_sew8 := mul_count(mul_count'left downto 2) & "00";
+            when "010" => sel_sew8 := "00" & mul_count(mul_count'left downto 2);
             -- INVALID SEW --
-            when others => ben_sel_sew8 := (others => '0');
+            when others => sel_sew8 := (others => '0');
         end case;
-        ben_mux_sew8 := vmask_i(((to_integer(unsigned(ben_sel_sew8)) + 1) * (VLEN/8))-1 downto (to_integer(unsigned(ben_sel_sew8)) * (VLEN/8)));
+        alum_mux_sew8  := vmask_reg(((to_integer(unsigned(sel_sew8)) + 1) * (VLEN/8))-1 downto (to_integer(unsigned(sel_sew8)) * (VLEN/8)));
+        ben_mux_sew8_i := vmask_i(((to_integer(unsigned(sel_sew8)) + 1) * (VLEN/8))-1 downto (to_integer(unsigned(sel_sew8)) * (VLEN/8)));
+        ben_mux_sew8   := vl_mask and ben_mux_sew8_i;
 
         -- SEW=16 MUX splits SEW=8 MUX in half --
-        ben_sel_sew16 := mul_count(0);
-        for ii in 0 to (ben_mux_sew8'length/2)-1 loop
-            case ben_sel_sew16 is
-                when '0'    => ben_mux_sew16((2*ii)+1 downto 2*ii) := std_ulogic_vector(resize(signed'(0 => ben_mux_sew8(ii))                          , 2));
-                when '1'    => ben_mux_sew16((2*ii)+1 downto 2*ii) := std_ulogic_vector(resize(signed'(0 => ben_mux_sew8(ii + (ben_mux_sew8'length/2))), 2));
-                when others => ben_mux_sew16((2*ii)+1 downto 2*ii) := (others => '0');
+        sel_sew16 := mul_count(0);
+        for ii in 0 to (VLEN/16)-1 loop
+            case sel_sew16 is
+                when '0'    => alum_mux_sew16(ii) := alum_mux_sew8(ii)                           ; ben_mux_sew16_i(ii) := ben_mux_sew8_i(ii);
+                when '1'    => alum_mux_sew16(ii) := alum_mux_sew8(ii + (alum_mux_sew8'length/2)); ben_mux_sew16_i(ii) := ben_mux_sew8_i(ii + (ben_mux_sew8_i'length/2));
+                when others => alum_mux_sew16(ii) := '0'                                         ; ben_mux_sew16_i(ii) := '0';
             end case;
+            ben_mux_sew16((2*ii)+1 downto 2*ii) := std_ulogic_vector(resize(signed'(0 => vl_mask(ii) and ben_mux_sew16_i(ii)), 2));
         end loop;
 
         -- SEW=32 MUX splits SEW=8 MUX in a quarter --
-        ben_sel_sew32 := mul_count(1 downto 0);
-        for ii in 0 to (ben_mux_sew8'length/4)-1 loop
-            case ben_sel_sew32 is
-                when "00"   => ben_mux_sew32((4*ii)+3 downto 4*ii) := std_ulogic_vector(resize(signed'(0 => ben_mux_sew8(ii))                              , 4));
-                when "01"   => ben_mux_sew32((4*ii)+3 downto 4*ii) := std_ulogic_vector(resize(signed'(0 => ben_mux_sew8(ii + (ben_mux_sew8'length/4)))    , 4));
-                when "10"   => ben_mux_sew32((4*ii)+3 downto 4*ii) := std_ulogic_vector(resize(signed'(0 => ben_mux_sew8(ii + (2*(ben_mux_sew8'length/4)))), 4));
-                when "11"   => ben_mux_sew32((4*ii)+3 downto 4*ii) := std_ulogic_vector(resize(signed'(0 => ben_mux_sew8(ii + (3*(ben_mux_sew8'length/4)))), 4));
-                when others => ben_mux_sew32((4*ii)+3 downto 4*ii) := (others => '0');
+        sel_sew32 := mul_count(1 downto 0);
+        for ii in 0 to (VLEN/32)-1 loop
+            case sel_sew32 is
+                when "00"   => alum_mux_sew32(ii) := alum_mux_sew8(ii)                               ; ben_mux_sew32_i(ii) := ben_mux_sew8_i(ii);
+                when "01"   => alum_mux_sew32(ii) := alum_mux_sew8(ii + (alum_mux_sew8'length/4))    ; ben_mux_sew32_i(ii) := ben_mux_sew8_i(ii + (ben_mux_sew8_i'length/4));
+                when "10"   => alum_mux_sew32(ii) := alum_mux_sew8(ii + (2*(alum_mux_sew8'length/4))); ben_mux_sew32_i(ii) := ben_mux_sew8_i(ii + (2*(ben_mux_sew8_i'length/4)));
+                when "11"   => alum_mux_sew32(ii) := alum_mux_sew8(ii + (3*(alum_mux_sew8'length/4))); ben_mux_sew32_i(ii) := ben_mux_sew8_i(ii + (3*(ben_mux_sew8_i'length/4)));
+                when others => alum_mux_sew32(ii) := '0'                                             ; ben_mux_sew32_i(ii) := '0';
             end case;
+            ben_mux_sew32((4*ii)+3 downto 4*ii) := std_ulogic_vector(resize(signed'(0 => vl_mask(ii) and ben_mux_sew32_i(ii)), 4));
         end loop;
 
         -- Select Mask Value based on EEW, OPCLASS and VALU_OP --
@@ -433,6 +464,14 @@ begin
         else
             ben_mux <= (others => '1');
         end if;
+
+        -- Use intermediary mask values to generate mask to be sent to V-INT --
+        case eew is
+            when "000"  => vint_mask <= std_ulogic_vector(resize(unsigned(alum_mux_sew8) , vint_mask'length));
+            when "001"  => vint_mask <= std_ulogic_vector(resize(unsigned(alum_mux_sew16), vint_mask'length));
+            when "010"  => vint_mask <= std_ulogic_vector(resize(unsigned(alum_mux_sew32), vint_mask'length));
+            when others => vint_mask <= (others => '0');
+        end case;
 
     end process;
 
@@ -512,7 +551,9 @@ begin
         valu_seq <= (
             cyc_count => cyc_count, mul_count => mul_count,
             vrf_vs2 => vrf_vs2, vrf_vs1 => vrf_vs1, vrf_vd => vrf_vd, vrf_ben => mask_i,
-            valu_op => valu_op, valu_opclass => valu_opclass, vint_valid => vint_valid, vint_clear => vint_clear, vmask_valid => vmask_valid, vmask_clear => vmask_clear,
+            valu_op => valu_op, valu_opclass => valu_opclass,
+            vint_valid => vint_valid, vint_clear => vint_clear, vint_mask => vint_mask,
+            vmask_valid => vmask_valid, vmask_clear => vmask_clear,
             masking_en => masking_en
         );
     end process;
