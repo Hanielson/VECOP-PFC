@@ -17,6 +17,39 @@ The design prioritizes:
 
 > Performance is intentionally traded for architectural transparency and scalability.
 
+## Project Structure
+```bash
+vector/
+├── rtl/
+│   ├── neorv32_valu.vhd
+│   ├── neorv32_valu_seq.vhd
+│   ├── neorv32_vbackend.vhd
+│   ├── neorv32_vdispatcher.vhd
+│   ├── neorv32_vecop.vhd
+│   ├── neorv32_vfrontend.vhd
+│   ├── neorv32_vint.vhd
+│   ├── neorv32_viq.vhd
+│   ├── neorv32_vlsu.vhd
+│   ├── neorv32_vmask.vhd
+│   ├── neorv32_vmockmem.vhd
+│   ├── neorv32_vpackage.vhd
+│   ├── neorv32_vrf.vhd
+│   └── neorv32_vsld.vhd
+├── scripts/
+│   ├── gen_mem.py
+│   ├── gen_vrf.py
+│   ├── mem_contents.txt
+│   ├── simple_add.txt
+│   ├── vrf_contents.txt
+│   ├── vrf_contents_simple.txt
+│   └── vrf_contents_zero.txt
+└── tb/
+    ├── valu_tb.vhd
+    ├── vecop_flex_tb.vhd
+    ├── vecop_sld_tb.vhd
+    └── vecop_tb.vhd
+```
+
 ## Architecture
 
 VECOP follows a vector microarchitecture:
@@ -28,14 +61,14 @@ VECOP follows a vector microarchitecture:
 ## Top-Level Subsystems
 ### V-Dispatcher
 
-Interface between scalar core and vector subsystem.
+> Interface between scalar core and vector subsystem.
 
 Responsibilities:
 - Instruction FIFO (decoupling queue)
 - First-level decode
 - Execution subsystem dispatch
 - Exception signaling to scalar core
-
+  
 Internal blocks:
 - V-FRONTEND
 - V-IQ (FIFO)
@@ -43,7 +76,7 @@ Internal blocks:
 
 ### V-ALU (Vector Arithmetic Logic Unit)
 
-Executes arithmetic, logical and mask operations.
+> Executes arithmetic, logical and mask operations.
 
 Components:
 - V-ALU SEQ — execution sequencer and level-2 control
@@ -65,7 +98,7 @@ Supported operations include:
 
 ### V-LSU (Vector Load Store Unit)
 
-Responsible for memory interaction.
+> Responsible for memory interaction.
 
 Features:
 - Address generation
@@ -113,13 +146,10 @@ VECOP uses decentralized control:
 Verification infrastructure consists of two primary testbenches:
 
 - VECOP TOP Testbench
-  > Uses OSVVM verification methodology.
-  - Random instruction generation with automatic checking:
+  - Uses OSVVM verification methodology for random instruction generation with automatic checking:
     - Instruction/configuration randomization
     - Execution
     - Result comparison against expected values
-
-
 - VECOP FLEX TOP Testbench
   - Instruction-driven verification using external TXT programs.
 
