@@ -61,7 +61,7 @@ Supported operations include:
 - Bitwise operations
 - Comparisons
 - Widening operations
-- Vector mask generating instructions (integer operands)
+- Vector mask generating instructions
 
 ### V-LSU (Vector Load Store Unit)
 
