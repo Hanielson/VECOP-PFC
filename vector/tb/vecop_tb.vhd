@@ -83,7 +83,7 @@ architecture tb of vecop_tb is
         constant DEST_LMUL : in integer;
         constant INDEX     : in integer;
         constant SEW       : in integer;
-        constant VM        : in std_ulogic;
+        constant VM        : in std_ulogic_vector;
         constant VL        : in integer;
         constant alu_op    : in std_ulogic_vector;
         constant vs2       : in expand_t;
@@ -109,7 +109,7 @@ architecture tb of vecop_tb is
         -- Loop that constructs the check array based on instruction and operand values --
         for ii in 0 to DEST_ELEM-1 loop
             -- Element is ACTIVE --
-            if (((VM = '1') and (vmask((INDEX * DEST_ELEM) + ii) = '1')) or (VM = '0')) and (((INDEX * DEST_ELEM) + ii) < VL) then
+            if (((VM = "1") and (vmask((INDEX * DEST_ELEM) + ii) = '1')) or (VM = "0")) and (((INDEX * DEST_ELEM) + ii) < VL) then
                 case alu_op is
                     when valu_waddu      => temp_2sew := std_ulogic_vector(resize(unsigned(vs2((cycle_i * DEST_ELEM) + ii)), DEST_SEW) + resize(unsigned(vs1((cycle_i * DEST_ELEM) + ii)), DEST_SEW));
                     when valu_wsubu      => temp_2sew := std_ulogic_vector(resize(unsigned(vs2((cycle_i * DEST_ELEM) + ii)), DEST_SEW) - resize(unsigned(vs1((cycle_i * DEST_ELEM) + ii)), DEST_SEW));
@@ -185,14 +185,14 @@ architecture tb of vecop_tb is
     procedure run_alu(
         constant LMUL        : in  integer;
         constant VSEW        : in  integer;
-        constant VM          : in  std_ulogic;
+        constant VM          : in  std_ulogic_vector;
         constant VL          : in  integer;
-        constant alu_op      : in  std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
+        constant alu_op      : in  std_ulogic_vector;
         constant vs2         : in  integer;
         constant vs1         : in  integer;
         constant vd          : in  integer;
-        constant funct6      : in  std_ulogic_vector(5 downto 0);
-        constant funct3      : in  std_ulogic_vector(2 downto 0);
+        constant funct6      : in  std_ulogic_vector;
+        constant funct3      : in  std_ulogic_vector;
         constant scalar      : in  integer;
         signal   vregfile    : in  vregfile_t;
         signal   viq_full    : in  std_ulogic;
@@ -342,8 +342,8 @@ architecture tb of vecop_tb is
     end procedure run_alu;
 
     procedure test_alu(
-        constant LMUL        : in integer;
-        constant VSEW        : in integer;
+        constant LMUL        : in std_ulogic_vector(2 downto 0);
+        constant VSEW        : in std_ulogic_vector(2 downto 0);
         constant VL          : in integer;
         signal   vregfile    : in vregfile_t;
         signal   viq_full    : in std_ulogic;
@@ -372,7 +372,10 @@ architecture tb of vecop_tb is
 
         variable funct6 : std_ulogic_vector(5 downto 0);
         variable funct3 : std_ulogic_vector(2 downto 0);
-        variable vm     : std_ulogic;
+        variable vm     : std_ulogic_vector(0 downto 0);
+
+        variable VSEW_i : integer;
+        variable LMUL_i : integer;
 
         variable scalar : integer;
 
@@ -384,9 +387,28 @@ architecture tb of vecop_tb is
         variable vs1_value : std_ulogic_vector(VLEN-1 downto 0);
         variable vd_value  : std_ulogic_vector(VLEN-1 downto 0);
     begin
+
+        -- DECODE VSEW values --
+        case VSEW is
+            -- TODO: add support for fractional VLMUL values --
+            when "000"  => VSEW_i := 8;
+            when "001"  => VSEW_i := 16;
+            when "010"  => VSEW_i := 32;
+            when others => VSEW_i := 0;
+        end case;
+
+        -- DECODE LMUL values --
+        case LMUL is
+            -- TODO: add support for fractional VLMUL values --
+            when "000"  => LMUL_i := 1;
+            when "001"  => LMUL_i := 2;
+            when "010"  => LMUL_i := 4;
+            when "011"  => LMUL_i := 8;
+            when others => LMUL_i := 0;
+        end case;
     
         -- TODO: add support for masked operations --
-        vm := '1';
+        vm := RV.RandSlv(0, 1, 1);
 
         -- TODO: add support for scalar operand --
         scalar := 0;
@@ -394,13 +416,13 @@ architecture tb of vecop_tb is
         for ii in valu_op_pool'range loop
             -- TODO: some restriction needs to be set for widening operations and some others --
             --       that don't support overlap between source and destination registers      --
-            if (LMUL >= 1) then
-                vs2 := std_ulogic_vector(to_unsigned((RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1)/LMUL)*LMUL, VREF_ADDR_WIDTH));
-                vs1 := std_ulogic_vector(to_unsigned((RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1)/LMUL)*LMUL, VREF_ADDR_WIDTH));
+            if (LMUL_i >= 1) then
+                vs2 := std_ulogic_vector(to_unsigned((RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1)/LMUL_i)*LMUL_i, VREF_ADDR_WIDTH));
+                vs1 := std_ulogic_vector(to_unsigned((RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1)/LMUL_i)*LMUL_i, VREF_ADDR_WIDTH));
                 -- TODO: for now, I'm restricting so that no destination overlap happens with source operands... This needs to be checked in hardware and in TB --
-                vd  := std_ulogic_vector(to_unsigned((RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1)/LMUL)*LMUL, VREF_ADDR_WIDTH));
+                vd  := std_ulogic_vector(to_unsigned((RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1)/LMUL_i)*LMUL_i, VREF_ADDR_WIDTH));
                 while ((vd = vs2) or (vd = vs1)) loop
-                    vd  := std_ulogic_vector(to_unsigned((RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1)/LMUL)*LMUL, VREF_ADDR_WIDTH));
+                    vd  := std_ulogic_vector(to_unsigned((RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1)/LMUL_i)*LMUL_i, VREF_ADDR_WIDTH));
                 end loop;
             else
                 vs2 := std_ulogic_vector(to_unsigned(RV.RandInt(0, (2**VREF_ADDR_WIDTH)-1), VREF_ADDR_WIDTH));
@@ -459,15 +481,15 @@ architecture tb of vecop_tb is
             instruction <= funct6 & vm & vs2 & vs1 & funct3 & vd & vop_arith_cfg;
 
             report "TESTING V-ALU OPERATION: " & opname;
-            run_alu(LMUL, VSEW, vm, VL, testop, to_integer(unsigned(vs2)), to_integer(unsigned(vs1)), to_integer(unsigned(vd)), funct6, funct3, scalar, vregfile, viq_full, viq_empty, instr_valid);
+            run_alu(LMUL_i, VSEW_i, vm, VL, testop, to_integer(unsigned(vs2)), to_integer(unsigned(vs1)), to_integer(unsigned(vd)), funct6, funct3, scalar, vregfile, viq_full, viq_empty, instr_valid);
             
             wait for 80 ns;
         end loop;
     end procedure test_alu;
 
     procedure test_lsu(
-        constant LMUL        : in  integer;
-        constant VSEW        : in  integer;
+        constant LMUL        : in  std_ulogic_vector(2 downto 0);
+        constant VSEW        : in  std_ulogic_vector(2 downto 0);
         constant access_mode : in  lsu_access_mode_t;
         constant lsu_width   : in  integer;
         constant load        : in  boolean;
@@ -569,6 +591,10 @@ begin
     stimuli: process
         alias vregfile : vregfile_t is << signal .vecop_tb.vecop.vrf.vregfile_0 : vregfile_t >>;
         alias mockmem  : mockmem_t is << signal .vecop_tb.vecop.vmockmem.mockmem : mockmem_t >>;
+
+        variable VSEW   : std_ulogic_vector(2 downto 0)  := (others => '0');
+        variable VLMUL  : std_ulogic_vector(2 downto 0)  := (others => '0');
+        variable VTYPEI : std_ulogic_vector(10 downto 0) := (others => '0');
     begin
 
         -- Initialize seed for random number generator --
@@ -584,51 +610,41 @@ begin
             RST <= '0';
             wait for 40 ns;
 
-            -- VSETVLI --> VLMUL = 4 | VSEW = 8 | VTA=VMA=0 | VL=MAXVL 
-            --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
-            VINST <= "0" & "00000000010" & "11111" & "111" & "11111" & "1010111";
+            -- Randomize VSEW value to be used --
+            case RV.RandInt(0, 2) is
+                -- TODO: implement fractional VLMULs --
+                when 0      => VSEW := "000";
+                when 1      => VSEW := "001";
+                when 2      => VSEW := "010";
+                when others => VSEW := (others => '0');
+            end case;
+
+            -- Randomize VLMUL value to be used --
+            case RV.RandInt(0, 3) is
+                -- TODO: implement fractional VLMULs --
+                when 0      => VLMUL := "000";
+                when 1      => VLMUL := "001";
+                when 2      => VLMUL := "010";
+                when 3      => VLMUL := "011";
+                when others => VLMUL := (others => '0');
+            end case;
+
+            -- VTYPEI -->   | VMA | VTA | VSEW | VLMUL |
+            VTYPEI := "000" & "0" & "0" & VSEW & VLMUL;
+            
+            -- VSETVLI --> VLMUL = 4 | VSEW = 8 | VTA=VMA=0 | VL=MAXVL
+            --------     | VTYPEI |  RS1    |  F3   |  RD     |  OPCODE  |
+            VINST <= "0" & VTYPEI & "11111" & "111" & "11111" & "1010111";
             SCAL1 <= std_ulogic_vector(to_unsigned(21, SCAL1'length));
             send_instruction(VQ_FULL, VINST_VALID);
 
             if (RUN_ALU_TEST) then
-                test_alu(4, 8, to_integer(unsigned(SCAL1)), vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
+                test_alu(VLMUL, VSEW, to_integer(unsigned(SCAL1)), vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
             end if;
 
             if (RUN_LSU_TEST) then
-                test_lsu(4, 8, UNIT_STRIDE, 8, TRUE, FALSE, vregfile, VQ_FULL, VQ_EMPTY, VINST, SCAL1, SCAL2, VINST_VALID);
+                test_lsu(VLMUL, VSEW, UNIT_STRIDE, 8, TRUE, FALSE, vregfile, VQ_FULL, VQ_EMPTY, VINST, SCAL1, SCAL2, VINST_VALID);
             end if;
-
-            --------------------------------------------------------------------------------------------
-            --------------------------------------------------------------------------------------------
-            --------------------------------------------------------------------------------------------
-
-            -- VSETVLI --> VLMUL = 4 | VSEW = 16 | VTA=VMA=0 | VL=MAXVL 
-            --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
-            VINST <= "0" & "00000001010" & "11111" & "111" & "11111" & "1010111";
-            SCAL1 <= std_ulogic_vector(to_unsigned(13, SCAL1'length));
-            send_instruction(VQ_FULL, VINST_VALID);
-
-            if (RUN_ALU_TEST) then
-                test_alu(4, 16, to_integer(unsigned(SCAL1)), vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
-            end if;
-
-            --------------------------------------------------------------------------------------------
-            --------------------------------------------------------------------------------------------
-            --------------------------------------------------------------------------------------------
-
-            -- VSETVLI --> VLMUL = 4 | VSEW = 32 | VTA=VMA=0 | VL=MAXVL 
-            --------     |    VTYPEI     |  RS1    |  F3   |  RD     |  OPCODE  |
-            VINST <= "0" & "00000010010" & "11111" & "111" & "11111" & "1010111";
-            SCAL1 <= std_ulogic_vector(to_unsigned(5, SCAL1'length));
-            send_instruction(VQ_FULL, VINST_VALID);
-
-            if (RUN_ALU_TEST) then
-                test_alu(4, 32, to_integer(unsigned(SCAL1)), vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
-            end if;
-
-            --------------------------------------------------------------------------------------------
-            --------------------------------------------------------------------------------------------
-            --------------------------------------------------------------------------------------------
 
             -- Wait until FIFO is empty --
             while (VQ_EMPTY = '0') loop

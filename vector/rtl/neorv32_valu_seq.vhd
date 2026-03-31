@@ -412,7 +412,7 @@ begin
         end loop;
 
         -- If instruction is masked, use v0 value, otherwise use ALL_ONES
-        vmask_i := vmask_reg when (vm = '1') else (others => '1');
+        vmask_i := vmask_reg when (vm = '1') and (enable_ben = '1') else (others => '1');
 
         -- SEW=8 MUX selects which (VLEN/8) word to generate the mask from --
         case eew is
@@ -453,17 +453,13 @@ begin
             ben_mux_sew32((4*ii)+3 downto 4*ii) := std_ulogic_vector(resize(signed'(0 => vl_mask(ii) and ben_mux_sew32_i(ii)), 4));
         end loop;
 
-        -- Select Mask Value based on EEW, OPCLASS and VALU_OP --
-        if (enable_ben = '1') then
-            case eew is
-                when "000"  => ben_mux <= ben_mux_sew8;
-                when "001"  => ben_mux <= ben_mux_sew16;
-                when "010"  => ben_mux <= ben_mux_sew32;
-                when others => ben_mux <= (others => '0');
-            end case;
-        else
-            ben_mux <= (others => '1');
-        end if;
+        -- Select Mask Value based on EEW  --
+        case eew is
+            when "000"  => ben_mux <= ben_mux_sew8;
+            when "001"  => ben_mux <= ben_mux_sew16;
+            when "010"  => ben_mux <= ben_mux_sew32;
+            when others => ben_mux <= (others => '0');
+        end case;
 
         -- Use intermediary mask values to generate mask to be sent to V-INT --
         case eew is
