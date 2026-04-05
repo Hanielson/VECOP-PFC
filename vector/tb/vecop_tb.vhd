@@ -27,7 +27,7 @@ architecture tb of vecop_tb is
         );
     end component neorv32_vecop;
 
-    shared variable ITERATIONS  : integer := 10;
+    shared variable ITERATIONS  : integer := 16;
     shared variable PASS_COUNT  : integer := 0;
     shared variable FAIL_COUNT  : integer := 0;
     shared variable TOTAL_COUNT : integer := 0;
@@ -98,9 +98,6 @@ architecture tb of vecop_tb is
 
         variable check      : expand_t((VLEN/DEST_SEW)-1 downto 0)(DEST_SEW-1 downto 0) := (others => (others => '0'));
         variable full_check : std_ulogic_vector(VLEN-1 downto 0)                        := (others => '0');
-
-        variable jomer  : std_ulogic_vector(SEW-1 downto 0);
-        variable jomer1  : std_ulogic_vector(DEST_SEW-1 downto 0);
     begin
 
         cycle_i    := INDEX mod (DEST_LMUL/LMUL);
@@ -344,7 +341,7 @@ architecture tb of vecop_tb is
     procedure test_alu(
         constant LMUL        : in std_ulogic_vector(2 downto 0);
         constant VSEW        : in std_ulogic_vector(2 downto 0);
-        constant VL          : in integer;
+        constant VL          : in std_ulogic_vector;
         signal   vregfile    : in vregfile_t;
         signal   viq_full    : in std_ulogic;
         signal   viq_empty   : in std_ulogic;
@@ -377,6 +374,9 @@ architecture tb of vecop_tb is
         variable VSEW_i : integer;
         variable LMUL_i : integer;
 
+        variable vlmax : integer;
+        variable avl   : integer;
+
         variable scalar : integer;
 
         variable vs2 : std_ulogic_vector(VREF_ADDR_WIDTH-1 downto 0);
@@ -406,6 +406,10 @@ architecture tb of vecop_tb is
             when "011"  => LMUL_i := 8;
             when others => LMUL_i := 0;
         end case;
+
+        -- Based on VSEW and LMUL, define VLMAX --
+        vlmax := LMUL_i * (VLEN / VSEW_i);
+        avl   := vlmax when (unsigned(VL) > to_unsigned(vlmax, VL'length)) else to_integer(unsigned(VL));
     
         -- TODO: add support for masked operations --
         vm := RV.RandSlv(0, 1, 1);
@@ -481,7 +485,7 @@ architecture tb of vecop_tb is
             instruction <= funct6 & vm & vs2 & vs1 & funct3 & vd & vop_arith_cfg;
 
             report "TESTING V-ALU OPERATION: " & opname;
-            run_alu(LMUL_i, VSEW_i, vm, VL, testop, to_integer(unsigned(vs2)), to_integer(unsigned(vs1)), to_integer(unsigned(vd)), funct6, funct3, scalar, vregfile, viq_full, viq_empty, instr_valid);
+            run_alu(LMUL_i, VSEW_i, vm, avl, testop, to_integer(unsigned(vs2)), to_integer(unsigned(vs1)), to_integer(unsigned(vd)), funct6, funct3, scalar, vregfile, viq_full, viq_empty, instr_valid);
             
             wait for 80 ns;
         end loop;
@@ -635,11 +639,11 @@ begin
             -- VSETVLI --> VLMUL = 4 | VSEW = 8 | VTA=VMA=0 | VL=MAXVL
             --------     | VTYPEI |  RS1    |  F3   |  RD     |  OPCODE  |
             VINST <= "0" & VTYPEI & "11111" & "111" & "11111" & "1010111";
-            SCAL1 <= std_ulogic_vector(to_unsigned(21, SCAL1'length));
+            SCAL1 <= std_ulogic_vector(to_signed(RV.RandInt(-2147483648, 2147483647), SCAL1'length));
             send_instruction(VQ_FULL, VINST_VALID);
 
             if (RUN_ALU_TEST) then
-                test_alu(VLMUL, VSEW, to_integer(unsigned(SCAL1)), vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
+                test_alu(VLMUL, VSEW, SCAL1, vregfile, VQ_FULL, VQ_EMPTY, VINST, VINST_VALID);
             end if;
 
             if (RUN_LSU_TEST) then

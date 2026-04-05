@@ -19,6 +19,9 @@ entity neorv32_vmask is
         -- Enable Operand Masking --
         masking_en : in std_ulogic;
 
+        -- VL Based Mask Value --
+        vlm_mask : in std_ulogic_vector(VLEN-1 downto 0);
+
         -- LMUL Counter --
         mul_counter : in std_ulogic_vector(2 downto 0);
 
@@ -61,8 +64,9 @@ architecture neorv32_vmask_rtl of neorv32_vmask is
     signal mxnor : std_ulogic_vector(VLEN-1 downto 0);
 
     -- Prefix Trees Stages Definition --
-    constant PREFIX_BITWIDTH : natural := natural(ceil(log2(real(VLEN))));
-    constant PREFIX_STAGES   : natural := natural(ceil(log2(real(MAX_ELEM))));
+    constant PREFIX_BITWIDTH   : natural := natural(ceil(log2(real(VLEN))));
+    constant PREFIX_SUM_STAGES : natural := natural(ceil(log2(real(MAX_ELEM))));
+    constant PREFIX_OR_STAGES : natural := natural(ceil(log2(real(VLEN))));
 
     -- Prefix Sum Tree Input MUX --
     constant PSUM_IMUX_SEL_W : natural := natural(ceil(log2(real(MIN_VSEW))));
@@ -76,12 +80,12 @@ architecture neorv32_vmask_rtl of neorv32_vmask is
     
     -- Prefix Sum Tree --
     type psum_stage_t is array (MAX_ELEM-1 downto 0) of unsigned(PREFIX_BITWIDTH downto 0);
-    type psum_tree_t is array (0 to PREFIX_STAGES) of psum_stage_t;
+    type psum_tree_t is array (0 to PREFIX_SUM_STAGES) of psum_stage_t;
     signal psum_tree : psum_tree_t;
     signal psum_out  : std_ulogic_vector(VLEN-1 downto 0);
 
     -- Prefix OR Tree --
-    type prefix_or_tree_t is array (0 to PREFIX_STAGES) of std_ulogic_vector(VLEN-1 downto 0);
+    type prefix_or_tree_t is array (0 to PREFIX_OR_STAGES) of std_ulogic_vector(VLEN-1 downto 0);
     signal prefix_or_tree : prefix_or_tree_t;
 
     -- Find First Set Vector --
@@ -116,11 +120,11 @@ begin
                     -- Prefix Sum Accumulator is only updated after all current results have been extracted... This can go over multiple cycles, depending on VSEW --
                     case vsew is
                         -- VSEW = 8 bits --
-                        when "000" => psum_accum <= psum_tree(PREFIX_STAGES)(MAX_ELEM-1);
+                        when "000" => psum_accum <= psum_tree(PREFIX_SUM_STAGES)(MAX_ELEM-1);
                         -- VSEW = 16 bits --
-                        when "001" => psum_accum <= psum_tree(PREFIX_STAGES)(MAX_ELEM-1) when (mul_counter(0) = '1') else psum_accum;
+                        when "001" => psum_accum <= psum_tree(PREFIX_SUM_STAGES)(MAX_ELEM-1) when (mul_counter(0) = '1') else psum_accum;
                         -- VSEW = 32 bits --
-                        when "010" => psum_accum <= psum_tree(PREFIX_STAGES)(MAX_ELEM-1) when (mul_counter(1 downto 0) = "11") else psum_accum;
+                        when "010" => psum_accum <= psum_tree(PREFIX_SUM_STAGES)(MAX_ELEM-1) when (mul_counter(1 downto 0) = "11") else psum_accum;
                         -- INVALID VSEW --
                         when others => psum_accum <= (others => '0');
                     end case;
@@ -168,19 +172,19 @@ begin
     -----------------------------------
     process(all) begin
         case alu_op is
-            when valu_mandn => mask_out_i <= mandn;
-            when valu_mand  => mask_out_i <= mand;
-            when valu_mor   => mask_out_i <= mor;
-            when valu_mxor  => mask_out_i <= mxor;
-            when valu_morn  => mask_out_i <= morn;
-            when valu_mnand => mask_out_i <= mnand;
-            when valu_mnor  => mask_out_i <= mnor;
-            when valu_mxnor => mask_out_i <= mxnor;
+            when valu_mandn => mask_out_i <= vlm_mask or mandn;
+            when valu_mand  => mask_out_i <= vlm_mask or mand;
+            when valu_mor   => mask_out_i <= vlm_mask or mor;
+            when valu_mxor  => mask_out_i <= vlm_mask or mxor;
+            when valu_morn  => mask_out_i <= vlm_mask or morn;
+            when valu_mnand => mask_out_i <= vlm_mask or mnand;
+            when valu_mnor  => mask_out_i <= vlm_mask or mnor;
+            when valu_mxnor => mask_out_i <= vlm_mask or mxnor;
             when valu_cpop  => mask_out_i <= (others => '0');
             when valu_first => mask_out_i <= (others => '0');
-            when valu_msbf  => mask_out_i <= before_first;
-            when valu_msof  => mask_out_i <= only_first;
-            when valu_msif  => mask_out_i <= include_first;
+            when valu_msbf  => mask_out_i <= vlm_mask or before_first;
+            when valu_msof  => mask_out_i <= vlm_mask or only_first;
+            when valu_msif  => mask_out_i <= vlm_mask or include_first;
             when valu_iota  => mask_out_i <= psum_out;
             when valu_id    => mask_out_i <= psum_out;
             when others     => mask_out_i <= (others => '0');
@@ -190,14 +194,14 @@ begin
     --------------------------
     --- Bitwise Operations ---
     --------------------------
-    mand  <= vmaskA_i and vmaskB_i;
-    mnand <= not (vmaskA_i and vmaskB_i);
-    mandn <= vmaskA_i and (not vmaskB_i);
-    mxor  <= vmaskA_i xor vmaskB_i;
-    mor   <= vmaskA_i or vmaskB_i;
-    mnor  <= not (vmaskA_i or vmaskB_i);
-    morn  <= vmaskA_i or (not vmaskB_i);
-    mxnor <= not (vmaskA_i xor vmaskB_i);
+    mand  <= vmaskA and vmaskB;
+    mnand <= not (vmaskA and vmaskB);
+    mandn <= vmaskA and (not vmaskB);
+    mxor  <= vmaskA xor vmaskB;
+    mor   <= vmaskA or vmaskB;
+    mnor  <= not (vmaskA or vmaskB);
+    morn  <= vmaskA or (not vmaskB);
+    mxnor <= not (vmaskA xor vmaskB);
 
     ---------------------------------
     --- Prefix Sum Tree Input MUX ---
@@ -224,7 +228,7 @@ begin
     -----------------------
     --- Prefix Sum Tree ---
     -----------------------
-    PREFIX_SUM_STAGE : for ii in 0 to PREFIX_STAGES generate
+    PREFIX_SUM_STAGE : for ii in 0 to PREFIX_SUM_STAGES generate
         PREFIX_SUM_ELEM : for jj in 0 to psum_tree(ii)'length-1 generate
             -- Stage 0 is simply the mask bits expanded --
             PREFIX_SUM_MASK: if (ii = 0) generate
@@ -263,16 +267,16 @@ begin
         variable psum_out_32b : std_ulogic_vector(VLEN-1 downto 0) := (others => '0');
     begin
         for ii in 0 to MAX_ELEM-1 loop
-            psum_out_8b(8*ii+7 downto 8*ii) := std_ulogic_vector(resize(unsigned(psum_tree(PREFIX_STAGES)(ii)), 8));
+            psum_out_8b(8*ii+7 downto 8*ii) := std_ulogic_vector(resize(unsigned(psum_tree(PREFIX_SUM_STAGES)(ii)), 8));
         end loop;
 
         for ii in 0 to (MAX_ELEM/2)-1 loop
-            psum_omux_16b(ii)                   := psum_tree(PREFIX_STAGES)(((MAX_ELEM/2) * to_integer(unsigned(mul_counter(0 downto 0)))) + ii);
+            psum_omux_16b(ii)                   := psum_tree(PREFIX_SUM_STAGES)(((MAX_ELEM/2) * to_integer(unsigned(mul_counter(0 downto 0)))) + ii);
             psum_out_16b(16*ii+15 downto 16*ii) := std_ulogic_vector(resize(psum_omux_16b(ii), 16));
         end loop;
 
         for ii in 0 to (MAX_ELEM/4)-1 loop
-            psum_omux_32b(ii)                   := psum_tree(PREFIX_STAGES)(((MAX_ELEM/4) * to_integer(unsigned(mul_counter(1 downto 0)))) + ii);
+            psum_omux_32b(ii)                   := psum_tree(PREFIX_SUM_STAGES)(((MAX_ELEM/4) * to_integer(unsigned(mul_counter(1 downto 0)))) + ii);
             psum_out_32b(32*ii+31 downto 32*ii) := std_ulogic_vector(resize(psum_omux_32b(ii), 32));
         end loop;
 
@@ -292,7 +296,7 @@ begin
     --- Prefix OR Tree ---
     ----------------------
     prefix_or_tree(0) <= vmaskA_i;
-    PREFIX_OR_STAGE : for ii in 1 to PREFIX_STAGES generate
+    PREFIX_OR_STAGE : for ii in 1 to PREFIX_OR_STAGES generate
         PREFIX_OR_ELEM : for jj in 0 to prefix_or_tree(ii)'length-1 generate
             -- Elements with index < (2^(ii-1)) already have the results done --
             PREFIX_OR_RUN: if (jj < (2**(ii-1))) generate
@@ -307,16 +311,16 @@ begin
     ------------------------------------
     --- First Non-Zero Bit Isolation ---
     ------------------------------------
-    ffset(0) <= prefix_or_tree(PREFIX_STAGES)(0);
+    ffset(0) <= prefix_or_tree(PREFIX_OR_STAGES)(0);
     ISOLATE_GEN : for ii in 1 to ffset'length-1 generate
-        ffset(ii) <= prefix_or_tree(PREFIX_STAGES)(ii) and (not prefix_or_tree(PREFIX_STAGES)(ii-1));
+        ffset(ii) <= prefix_or_tree(PREFIX_OR_STAGES)(ii) and (not prefix_or_tree(PREFIX_OR_STAGES)(ii-1));
     end generate ISOLATE_GEN;
 
     ---------------------------
     --- Results Assignments ---
     ---------------------------
     process(all) begin
-        before_first  <= not prefix_or_tree(PREFIX_STAGES);
+        before_first  <= not prefix_or_tree(PREFIX_OR_STAGES);
         include_first <= before_first or ffset;
         only_first    <= ffset;
     end process;

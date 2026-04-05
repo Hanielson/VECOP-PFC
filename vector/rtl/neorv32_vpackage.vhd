@@ -158,6 +158,7 @@ package neorv32_vpackage is
         vmask_valid  : std_ulogic;
         vmask_clear  : std_ulogic;
         masking_en   : std_ulogic;
+        vlm_mask     : std_ulogic_vector(VLEN-1 downto 0);
         cyc_count    : std_ulogic_vector(2 downto 0);
         mul_count    : std_ulogic_vector(2 downto 0);
     end record;

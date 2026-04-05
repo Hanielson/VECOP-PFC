@@ -82,10 +82,13 @@ architecture neorv32_valu_seq_rtl of neorv32_valu_seq is
 
     -- VRF ByteEnable Signals --
     signal ben_mux    : std_ulogic_vector((VLEN/8)-1 downto 0);
-    signal enable_ben : std_ulogic;
+    signal elemgen_op : std_ulogic;
 
     -- V-INT Mask Value Signal --
     signal vint_mask : std_ulogic_vector((VLEN/8)-1 downto 0);
+
+    -- V-MASK VL-based Mask Value --
+    signal vlm_mask : std_ulogic_vector(VLEN downto 0);
 
     -- V-ALU Operation Type and Class --
     signal valu_op_i      : std_ulogic_vector(VALU_OP_WIDTH-1 downto 0);
@@ -299,7 +302,7 @@ begin
                     if (cyc_count /= max_cycle) and (vl_end = '0') then
                         state <= UPDATE_CYC;
                     -- If another loop of execution is needed due to LMUL --
-                    elsif (mul_count /= vlmul_i) and (vl_end = '0') then
+                    elsif (mul_count /= vlmul_i) and (vl_end = '0') and (elemgen_op = '1') then
                         state <= UPDATE_MUL;
                     -- If all is done, then cleanup the current status of SubModules... --
                     else
@@ -369,7 +372,8 @@ begin
     ------------------------------------
     process(all)
         -- Internal Masking value due to VL configuration --
-        variable vl_mask : std_ulogic_vector((VLEN/8)-1 downto 0);
+        variable vl_mask_i : std_ulogic_vector((VLEN/8) downto 0);
+        variable vl_mask   : std_ulogic_vector((VLEN/8)-1 downto 0);
 
         -- Multiplexer to select between v0 value and ALL_ONES --
         variable vmask_i : std_ulogic_vector(VLEN-1 downto 0);
@@ -396,23 +400,12 @@ begin
     begin
 
         -- VL Mask Value Calculation --
-        vl_mask := (others => '1');
-        for ii in 0 to (VLEN/8) loop
-            -- If (elem_count = 0), all elements should be masked out --
-            if (ii = 0) and (vl_end = '1') and (unsigned(elem_count) = to_unsigned(ii, elem_count'length)) then
-                vl_mask := (others => '0');
-            -- Set all bits from 0 up to elem_count to mask out inactive elements in vector register --
-            elsif (vl_end = '1') and (unsigned(elem_count) = to_unsigned(ii, elem_count'length)) then
-                vl_mask := (others => '0');
-                -- ModelSim gives me a tantrum if I try to use others and a loop variable in the same assignment... --
-                for jj in 0 to ii-1 loop
-                    vl_mask(jj) := '1';
-                end loop;
-            end if;
-        end loop;
+        vl_mask_i := std_ulogic_vector((to_unsigned(1, vl_mask_i'length) sll to_integer(unsigned(elem_count))) - 1);
+        vl_mask   := vl_mask_i(vl_mask_i'left-1 downto 0);
+        vlm_mask  <= not std_ulogic_vector((to_unsigned(1, vlm_mask'length) sll to_integer(unsigned(vl))) - 1);
 
         -- If instruction is masked, use v0 value, otherwise use ALL_ONES
-        vmask_i := vmask_reg when (vm = '1') and (enable_ben = '1') else (others => '1');
+        vmask_i := vmask_reg when (vm = '1') and (elemgen_op = '1') else (others => '1');
 
         -- SEW=8 MUX selects which (VLEN/8) word to generate the mask from --
         case eew is
@@ -490,6 +483,7 @@ begin
         variable vmask_valid  : std_ulogic;
         variable vmask_clear  : std_ulogic;
         variable masking_en   : std_ulogic;
+        variable vlm_mask_i   : std_ulogic_vector(VLEN-1 downto 0);
     begin
         
         -- Auxiliary Variables --
@@ -509,8 +503,9 @@ begin
         vmask_valid  := '0';
         vmask_clear  := '0';
 
-        -- Operand Masking Enable --
+        -- V-MASK Control --
         masking_en := vm;
+        vlm_mask_i := vlm_mask(vlm_mask'left-1 downto 0);
 
         -- V-Dispatcher Response --
         seqend <= '0';
@@ -549,7 +544,7 @@ begin
             vrf_vs2 => vrf_vs2, vrf_vs1 => vrf_vs1, vrf_vd => vrf_vd, vrf_ben => mask_i,
             valu_op => valu_op, valu_opclass => valu_opclass,
             vint_valid => vint_valid, vint_clear => vint_clear, vint_mask => vint_mask,
-            vmask_valid => vmask_valid, vmask_clear => vmask_clear,
+            vmask_valid => vmask_valid, vmask_clear => vmask_clear, vlm_mask => vlm_mask_i,
             masking_en => masking_en
         );
     end process;
@@ -561,97 +556,97 @@ begin
         case funct3 is
             -- OPIVV, OPIVX or OPIVI --
             when "000" | "100" | "011" =>
-                if    (funct6 = "000000")                       then valu_op_i <= valu_add  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "000010") and (funct3 /= "011") then valu_op_i <= valu_sub  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "000011") and (funct3 /= "000") then valu_op_i <= valu_rsub ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "000100") and (funct3 /= "011") then valu_op_i <= valu_minu ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "000101") and (funct3 /= "011") then valu_op_i <= valu_min  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "000110") and (funct3 /= "011") then valu_op_i <= valu_maxu ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "000111") and (funct3 /= "011") then valu_op_i <= valu_max  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "001001")                       then valu_op_i <= valu_and  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "001010")                       then valu_op_i <= valu_or   ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "001011")                       then valu_op_i <= valu_xor  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "010000")                       then valu_op_i <= valu_adc  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "010001")                       then valu_op_i <= valu_madc ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "010010") and (funct3 /= "011") then valu_op_i <= valu_sbc  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "010011") and (funct3 /= "011") then valu_op_i <= valu_msbc ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "010111")                       then valu_op_i <= valu_merge; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "011000")                       then valu_op_i <= valu_se   ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "011001")                       then valu_op_i <= valu_sne  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "011010") and (funct3 /= "011") then valu_op_i <= valu_sltu ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "011011") and (funct3 /= "011") then valu_op_i <= valu_slt  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "011100")                       then valu_op_i <= valu_sleu ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "011101")                       then valu_op_i <= valu_sle  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "011110") and (funct3 /= "000") then valu_op_i <= valu_sgtu ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "011111") and (funct3 /= "000") then valu_op_i <= valu_sgt  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "100101")                       then valu_op_i <= valu_sll  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "101000")                       then valu_op_i <= valu_srl  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "101001")                       then valu_op_i <= valu_sra  ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "101100")                       then valu_op_i <= valu_nsrl ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "101101")                       then valu_op_i <= valu_nsra ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
+                if    (funct6 = "000000")                       then valu_op_i <= valu_add  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "000010") and (funct3 /= "011") then valu_op_i <= valu_sub  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "000011") and (funct3 /= "000") then valu_op_i <= valu_rsub ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "000100") and (funct3 /= "011") then valu_op_i <= valu_minu ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "000101") and (funct3 /= "011") then valu_op_i <= valu_min  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "000110") and (funct3 /= "011") then valu_op_i <= valu_maxu ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "000111") and (funct3 /= "011") then valu_op_i <= valu_max  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "001001")                       then valu_op_i <= valu_and  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "001010")                       then valu_op_i <= valu_or   ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "001011")                       then valu_op_i <= valu_xor  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "010000")                       then valu_op_i <= valu_adc  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "010001")                       then valu_op_i <= valu_madc ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "010010") and (funct3 /= "011") then valu_op_i <= valu_sbc  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "010011") and (funct3 /= "011") then valu_op_i <= valu_msbc ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "010111")                       then valu_op_i <= valu_merge; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "011000")                       then valu_op_i <= valu_se   ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "011001")                       then valu_op_i <= valu_sne  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "011010") and (funct3 /= "011") then valu_op_i <= valu_sltu ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "011011") and (funct3 /= "011") then valu_op_i <= valu_slt  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "011100")                       then valu_op_i <= valu_sleu ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "011101")                       then valu_op_i <= valu_sle  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "011110") and (funct3 /= "000") then valu_op_i <= valu_sgtu ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "011111") and (funct3 /= "000") then valu_op_i <= valu_sgt  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "100101")                       then valu_op_i <= valu_sll  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "101000")                       then valu_op_i <= valu_srl  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "101001")                       then valu_op_i <= valu_sra  ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "101100")                       then valu_op_i <= valu_nsrl ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "101101")                       then valu_op_i <= valu_nsra ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
                 -- INVALID FUNCT6 --
                 else
-                    valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP; enable_ben <= '0';
+                    valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP; elemgen_op <= '0';
                 end if;
 
             -- OPMVV or OPMVX --
             when "010" | "110" =>
                 -- VWXUNARY0 --
                 if (funct6 = "010000") and (funct3 = "010") then
-                    if    (vs1 = "00000") then valu_op_i <= valu_mvxs ; valu_opclass_i <= VALU_MOP; enable_ben <= '0';
-                    elsif (vs1 = "10000") then valu_op_i <= valu_cpop ; valu_opclass_i <= VALU_MOP; enable_ben <= '0';
-                    elsif (vs1 = "10001") then valu_op_i <= valu_first; valu_opclass_i <= VALU_MOP; enable_ben <= '0';
+                    if    (vs1 = "00000") then valu_op_i <= valu_mvxs ; valu_opclass_i <= VALU_MOP; elemgen_op <= '0';
+                    elsif (vs1 = "10000") then valu_op_i <= valu_cpop ; valu_opclass_i <= VALU_MOP; elemgen_op <= '0';
+                    elsif (vs1 = "10001") then valu_op_i <= valu_first; valu_opclass_i <= VALU_MOP; elemgen_op <= '0';
                     -- INVALID SOURCE_1 --
                     else
-                        valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP; enable_ben <= '0';
+                        valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP; elemgen_op <= '0';
                     end if;
                 -- VXUNARY0 --
                 elsif (funct6 = "010010") and (funct3 = "010") then
-                    if    (vs1 = "00100") then valu_op_i <= valu_zext_vf4; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                    elsif (vs1 = "00101") then valu_op_i <= valu_sext_vf4; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                    elsif (vs1 = "00110") then valu_op_i <= valu_zext_vf2; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                    elsif (vs1 = "00111") then valu_op_i <= valu_sext_vf2; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
+                    if    (vs1 = "00100") then valu_op_i <= valu_zext_vf4; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                    elsif (vs1 = "00101") then valu_op_i <= valu_sext_vf4; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                    elsif (vs1 = "00110") then valu_op_i <= valu_zext_vf2; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                    elsif (vs1 = "00111") then valu_op_i <= valu_sext_vf2; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
                     -- INVALID SOURCE_1 --
                     else
-                        valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP; enable_ben <= '0';
+                        valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP; elemgen_op <= '0';
                     end if;
                 -- VMUNARY0 --
                 elsif (funct6 = "010100") and (funct3 = "010") then
-                    if    (vs1 = "00001") then valu_op_i <= valu_msbf; valu_opclass_i <= VALU_MOP; enable_ben <= '0';
-                    elsif (vs1 = "00010") then valu_op_i <= valu_msof; valu_opclass_i <= VALU_MOP; enable_ben <= '0';
-                    elsif (vs1 = "00011") then valu_op_i <= valu_msif; valu_opclass_i <= VALU_MOP; enable_ben <= '0';
-                    elsif (vs1 = "10000") then valu_op_i <= valu_iota; valu_opclass_i <= VALU_MOP; enable_ben <= '1';
-                    elsif (vs1 = "10001") then valu_op_i <= valu_id  ; valu_opclass_i <= VALU_MOP; enable_ben <= '1';
+                    if    (vs1 = "00001") then valu_op_i <= valu_msbf; valu_opclass_i <= VALU_MOP; elemgen_op <= '0';
+                    elsif (vs1 = "00010") then valu_op_i <= valu_msof; valu_opclass_i <= VALU_MOP; elemgen_op <= '0';
+                    elsif (vs1 = "00011") then valu_op_i <= valu_msif; valu_opclass_i <= VALU_MOP; elemgen_op <= '0';
+                    elsif (vs1 = "10000") then valu_op_i <= valu_iota; valu_opclass_i <= VALU_MOP; elemgen_op <= '1';
+                    elsif (vs1 = "10001") then valu_op_i <= valu_id  ; valu_opclass_i <= VALU_MOP; elemgen_op <= '1';
                     -- INVALID SOURCE_1 --
                     else
-                        valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP; enable_ben <= '0';
+                        valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP; elemgen_op <= '0';
                     end if;
-                elsif (funct6 = "011000") and (funct3 = "010") then valu_op_i <= valu_mandn     ; valu_opclass_i <= VALU_MOP  ; enable_ben <= '0';
-                elsif (funct6 = "011001") and (funct3 = "010") then valu_op_i <= valu_mand      ; valu_opclass_i <= VALU_MOP  ; enable_ben <= '0';
-                elsif (funct6 = "011010") and (funct3 = "010") then valu_op_i <= valu_mor       ; valu_opclass_i <= VALU_MOP  ; enable_ben <= '0';
-                elsif (funct6 = "011011") and (funct3 = "010") then valu_op_i <= valu_mxor      ; valu_opclass_i <= VALU_MOP  ; enable_ben <= '0';
-                elsif (funct6 = "011100") and (funct3 = "010") then valu_op_i <= valu_morn      ; valu_opclass_i <= VALU_MOP  ; enable_ben <= '0';
-                elsif (funct6 = "011101") and (funct3 = "010") then valu_op_i <= valu_mnand     ; valu_opclass_i <= VALU_MOP  ; enable_ben <= '0';
-                elsif (funct6 = "011110") and (funct3 = "010") then valu_op_i <= valu_mnor      ; valu_opclass_i <= VALU_MOP  ; enable_ben <= '0';
-                elsif (funct6 = "011111") and (funct3 = "010") then valu_op_i <= valu_mxnor     ; valu_opclass_i <= VALU_MOP  ; enable_ben <= '0';
-                elsif (funct6 = "110000")                      then valu_op_i <= valu_waddu     ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "110001")                      then valu_op_i <= valu_wadd      ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "110010")                      then valu_op_i <= valu_wsubu     ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "110011")                      then valu_op_i <= valu_wsub      ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "110100")                      then valu_op_i <= valu_waddu_2sew; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "110101")                      then valu_op_i <= valu_wadd_2sew ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "110110")                      then valu_op_i <= valu_wsubu_2sew; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
-                elsif (funct6 = "110111")                      then valu_op_i <= valu_wsub_2sew ; valu_opclass_i <= VALU_INTOP; enable_ben <= '1';
+                elsif (funct6 = "011000") and (funct3 = "010") then valu_op_i <= valu_mandn     ; valu_opclass_i <= VALU_MOP  ; elemgen_op <= '0';
+                elsif (funct6 = "011001") and (funct3 = "010") then valu_op_i <= valu_mand      ; valu_opclass_i <= VALU_MOP  ; elemgen_op <= '0';
+                elsif (funct6 = "011010") and (funct3 = "010") then valu_op_i <= valu_mor       ; valu_opclass_i <= VALU_MOP  ; elemgen_op <= '0';
+                elsif (funct6 = "011011") and (funct3 = "010") then valu_op_i <= valu_mxor      ; valu_opclass_i <= VALU_MOP  ; elemgen_op <= '0';
+                elsif (funct6 = "011100") and (funct3 = "010") then valu_op_i <= valu_morn      ; valu_opclass_i <= VALU_MOP  ; elemgen_op <= '0';
+                elsif (funct6 = "011101") and (funct3 = "010") then valu_op_i <= valu_mnand     ; valu_opclass_i <= VALU_MOP  ; elemgen_op <= '0';
+                elsif (funct6 = "011110") and (funct3 = "010") then valu_op_i <= valu_mnor      ; valu_opclass_i <= VALU_MOP  ; elemgen_op <= '0';
+                elsif (funct6 = "011111") and (funct3 = "010") then valu_op_i <= valu_mxnor     ; valu_opclass_i <= VALU_MOP  ; elemgen_op <= '0';
+                elsif (funct6 = "110000")                      then valu_op_i <= valu_waddu     ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "110001")                      then valu_op_i <= valu_wadd      ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "110010")                      then valu_op_i <= valu_wsubu     ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "110011")                      then valu_op_i <= valu_wsub      ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "110100")                      then valu_op_i <= valu_waddu_2sew; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "110101")                      then valu_op_i <= valu_wadd_2sew ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "110110")                      then valu_op_i <= valu_wsubu_2sew; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
+                elsif (funct6 = "110111")                      then valu_op_i <= valu_wsub_2sew ; valu_opclass_i <= VALU_INTOP; elemgen_op <= '1';
                 -- INVALID FUNCT6 --
                 else
-                    valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP; enable_ben <= '0';
+                    valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP; elemgen_op <= '0';
                 end if;
 
             -- OPFVV or OPFVF --
-            when "001" | "101" => valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP; enable_ben <= '0';
+            when "001" | "101" => valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP; elemgen_op <= '0';
 
             -- INVALID FUNCT3 --
-            when others => valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP; enable_ben <= '0';
+            when others => valu_op_i <= valu_invalid; valu_opclass_i <= VALU_INVALOP; elemgen_op <= '0';
         end case;
     end process;
 
