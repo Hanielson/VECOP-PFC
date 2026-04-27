@@ -30,6 +30,9 @@ architecture tb of vecop_flex_tb is
         );
     end component neorv32_vecop;
 
+    shared variable INST_COUNT : natural := 0;
+    shared variable CYCLE      : natural := 0;
+
     signal CLK         : std_ulogic                         := '0';
     signal RST         : std_ulogic                         := '0';
     signal VINST       : std_ulogic_vector(XLEN-1 downto 0) := (others => '0');
@@ -45,29 +48,29 @@ architecture tb of vecop_flex_tb is
     procedure send_instruction(signal full : in std_ulogic; signal valid : out std_ulogic) is
     begin
         valid <= '1';
-        wait for 20 ns;
+        wait for CLK_PERIOD;
         -- Wait for a free slot in the FIFO --
         while (full = '1') loop
-            wait for 20 ns;
+            wait for CLK_PERIOD;
         end loop;
         valid <= '0';
-        wait for 40 ns;
+        wait for CLK_PERIOD;
     end procedure send_instruction;
 
     procedure send_instruction_and_wait(signal empty : in std_ulogic; signal valid : out std_ulogic) is
     begin
         -- Send Instruction to FIFO and wait for it to complete (FIFO empty again) --
         while (empty = '0') loop
-            wait for 20 ns;
+            wait for CLK_PERIOD;
         end loop;
         -- Send out the instruction to the V-IQ FIFO --
         valid <= '1';
-        wait for 20 ns;
+        wait for CLK_PERIOD;
         valid <= '0';
-        wait for 20 ns;
+        wait for CLK_PERIOD;
         -- Wait until the instruction is completed by checking FIFO status --
         while (empty = '0') loop
-            wait for 20 ns;
+            wait for CLK_PERIOD;
         end loop;
     end procedure send_instruction_and_wait;
 
@@ -112,7 +115,8 @@ architecture tb of vecop_flex_tb is
                 vinst <= vinst_i;
                 scal2 <= std_ulogic_vector(to_unsigned(scal2_i, scal2'length));
                 scal1 <= std_ulogic_vector(to_unsigned(scal1_i, scal1'length));
-                send_instruction_and_wait(viq_empty, viq_valid);
+                send_instruction(viq_empty, viq_valid);
+                INST_COUNT := INST_COUNT + 1;
 
                 -- Re-Initialize Variable Values --
                 vinst_i := (others => '0');
@@ -126,6 +130,12 @@ architecture tb of vecop_flex_tb is
 begin
 
     CLK <= not CLK after 10 ns;
+
+    cyc_counter : process(clk) begin
+        if rising_edge(clk) and (INST_COUNT > 0) then
+            CYCLE := CYCLE + 1;
+        end if;
+    end process;
 
     vecop: entity work.neorv32_vecop port map (
         clk            => CLK,
@@ -147,21 +157,33 @@ begin
         alias vregfile : vregfile_t is << signal .vecop_flex_tb.vecop.vrf.vregfile_0 : vregfile_t >>;
         alias mockmem  : mockmem_t is << signal .vecop_flex_tb.vecop.vmockmem.mockmem : mockmem_t >>;
 
-        variable test_file : string(1 to 57) := "D:/UFMG/TCC/projeto/NeoRV32/vector/scripts/simple_add.txt";
-    begin
-        RST <= '0';
-        wait for 40 ns;
-        RST <= '1';
-        wait for 40 ns;
-        RST <= '0';
-        wait for 40 ns;
+        variable simple_add   : string(1 to 57) := "D:/UFMG/TCC/projeto/NeoRV32/vector/scripts/simple_add.txt";
+        variable depend_chain : string(1 to 59) := "D:/UFMG/TCC/projeto/NeoRV32/vector/scripts/depend_chain.txt";
+        variable strided_test : string(1 to 59) := "D:/UFMG/TCC/projeto/NeoRV32/vector/scripts/strided_test.txt";
+        variable arith_chain  : string(1 to 58) := "D:/UFMG/TCC/projeto/NeoRV32/vector/scripts/arith_chain.txt";
+        variable saxpy        : string(1 to 52) := "D:/UFMG/TCC/projeto/NeoRV32/vector/scripts/saxpy.txt";
 
-        run_test(test_file, VINST, SCAL2, SCAL1, VQ_FULL, VQ_EMPTY, VINST_VALID);
+        variable AVG_CPI : natural := 0;
+    begin
+
+        -- Simulation starts at negative edge of clock --
+        wait for (CLK_PERIOD / 2);
+        RST <= '0';
+        wait for (2 * CLK_PERIOD);
+        RST <= '1';
+        wait for (2 * CLK_PERIOD);
+        RST <= '0';
+        wait for (2 * CLK_PERIOD);
+
+        run_test(saxpy, VINST, SCAL2, SCAL1, VQ_FULL, VQ_EMPTY, VINST_VALID);
 
         while (VQ_EMPTY = '0') loop
-            wait for 20 ns;
+            wait for CLK_PERIOD;
         end loop;
-        wait for 160 ns;
+        
+        AVG_CPI := (CYCLE / INST_COUNT);
+
+        report "TEST RESULT ==> INSTRUCTION COUNT: " & natural'image(INST_COUNT) & " TOTAL CYCLES: " & natural'image(CYCLE) & " AVERAGE CPI: " & natural'image(AVG_CPI);
 
         finish;
     end process;

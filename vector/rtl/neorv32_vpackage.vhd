@@ -24,6 +24,11 @@ package neorv32_vpackage is
     constant VLSU_MAX_CHUNK   : natural := (VLEN / VLSU_MEM_W);
     constant VLSU_CHUNK_CNT_W : natural := natural(ceil(log2(real(VLSU_MAX_CHUNK))));
 
+    ---------------------------
+    --- CLK Period Constant ---
+    ---------------------------
+    constant CLK_PERIOD : time := 20 ns;
+
     ---------------------------------------
     --- Vector Control/Status Registers ---
     ---------------------------------------
