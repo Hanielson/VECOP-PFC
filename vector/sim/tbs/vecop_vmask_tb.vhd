@@ -8,6 +8,7 @@ use osvvm.RandomPkg.all;
 
 use work.neorv32_vpackage.all;
 
+use std.textio.all;
 use std.env.finish;
 
 entity vecop_vmask_tb is
@@ -27,7 +28,7 @@ architecture tb of vecop_vmask_tb is
         );
     end component neorv32_vecop;
 
-    shared variable ITERATIONS  : integer := 32;
+    shared variable ITERATIONS  : integer := 64;
     shared variable PASS_COUNT  : integer := 0;
     shared variable FAIL_COUNT  : integer := 0;
     shared variable TOTAL_COUNT : integer := 0;
@@ -44,6 +45,30 @@ architecture tb of vecop_vmask_tb is
     signal VQ_EMPTY    : std_ulogic                         := '0';
 
     shared variable avl   : integer;
+
+    file result_logger : text open write_mode is "vecop_mask_logger.log";
+
+    function get_opname(testop: std_ulogic_vector) return string is
+    begin
+        case testop is
+                when valu_cpop  => return "VCPOP";
+                when valu_first => return "VFIRST";
+                when valu_msbf  => return "VMSBF";
+                when valu_msof  => return "VMSOF";
+                when valu_msif  => return "VMSIF";
+                when valu_iota  => return "VIOTA";
+                when valu_id    => return "VID";
+                when valu_mandn => return "VMANDN";
+                when valu_mand  => return "VMAND";
+                when valu_mor   => return "VMOR";
+                when valu_mxor  => return "VMXOR";
+                when valu_morn  => return "VMORN";
+                when valu_mnand => return "VMNAND";
+                when valu_mnor  => return "VMNOR";
+                when valu_mxnor => return "VMXNOR";
+                when others     => report "INVALID";
+            end case;
+    end function;
 
     procedure send_instruction_and_wait(signal empty : in std_ulogic; signal valid : out std_ulogic) is
     begin
@@ -89,6 +114,9 @@ architecture tb of vecop_vmask_tb is
         variable check      : expand_t((VLEN/DEST_SEW)-1 downto 0)(DEST_SEW-1 downto 0) := (others => (others => '0'));
         variable check_vlen : std_ulogic_vector(VLEN-1 downto 0)                        := (others => '0');
         variable full_check : std_ulogic_vector(VLEN-1 downto 0)                        := (others => '0');
+
+        variable msg : string(1 to 512);
+        variable line_buffer : line;
     begin
         -- If masking is enabled, apply mask to operands --
         vs2_i := (vs2 and vmask) when (VM = "1") else vs2;
@@ -147,14 +175,29 @@ architecture tb of vecop_vmask_tb is
                 end case;
                 -- Apply VL mask to calculated output --
                 check_vlen := vlmask or check_vlen;
+
+                write(line_buffer, get_opname(alu_op));
+                write(line_buffer, string'(","));
+                write(line_buffer, integer'image(SEW));
+                write(line_buffer, string'(","));
+                write(line_buffer, integer'image(LMUL));
+                write(line_buffer, string'(","));
+                write(line_buffer, to_hstring(vd));
+                write(line_buffer, string'(","));
+                write(line_buffer, to_hstring(check_vlen));
+
                 -- Check calculated expected value against what is read from the VRF --
                 if (check_vlen = vd) then
-                    report "V-MASK Operation Check...PASSED";
+                    report get_opname(alu_op) & "...PASSED";
                     PASS_COUNT := PASS_COUNT + 1;
+                    write(line_buffer, string'(",PASSED"));
                 else
-                    report "V-MASK Operation Check -- ACTUAL: " & to_hstring(vd) & " EXPECTED: " & to_hstring(check_vlen) & "...FAILED";
+                    report get_opname(alu_op) & " -- ACTUAL: " & to_hstring(vd) & " EXPECTED: " & to_hstring(check_vlen) & "...FAILED";
                     FAIL_COUNT := FAIL_COUNT + 1;
+                    write(line_buffer, string'(",FAILED"));
                 end if;
+
+                writeline(result_logger, line_buffer);
         end case;
     end procedure check_result_mask;
 
@@ -326,28 +369,27 @@ architecture tb of vecop_vmask_tb is
             -- TODO: increase supported combination of funct6 and funct3 to test more operation types --
             -- Operation FUNCT6 / FUNCT3 Lookup Table --
             case testop is
-                when valu_cpop  => funct6 := "010000"; funct3 := "010"; opname := "VCPOP      "; vs1 := "10000"; vm := vm;
-                when valu_first => funct6 := "010000"; funct3 := "010"; opname := "VFIRST     "; vs1 := "10001"; vm := vm;
-                when valu_msbf  => funct6 := "010100"; funct3 := "010"; opname := "VMSBF      "; vs1 := "00001"; vm := vm;
-                when valu_msof  => funct6 := "010100"; funct3 := "010"; opname := "VMSOF      "; vs1 := "00010"; vm := vm;
-                when valu_msif  => funct6 := "010100"; funct3 := "010"; opname := "VMSIF      "; vs1 := "00011"; vm := vm;
-                when valu_iota  => funct6 := "010100"; funct3 := "010"; opname := "VIOTA      "; vs1 := "10000"; vm := vm;
-                when valu_id    => funct6 := "010100"; funct3 := "010"; opname := "VID        "; vs1 := "10001"; vm := vm;
-                when valu_mandn => funct6 := "011000"; funct3 := "010"; opname := "VMANDN     "; vs1 := vs1    ; vm := "0";
-                when valu_mand  => funct6 := "011001"; funct3 := "010"; opname := "VMAND      "; vs1 := vs1    ; vm := "0";
-                when valu_mor   => funct6 := "011010"; funct3 := "010"; opname := "VMOR       "; vs1 := vs1    ; vm := "0";
-                when valu_mxor  => funct6 := "011011"; funct3 := "010"; opname := "VMXOR      "; vs1 := vs1    ; vm := "0";
-                when valu_morn  => funct6 := "011100"; funct3 := "010"; opname := "VMORN      "; vs1 := vs1    ; vm := "0";
-                when valu_mnand => funct6 := "011101"; funct3 := "010"; opname := "VMNAND     "; vs1 := vs1    ; vm := "0";
-                when valu_mnor  => funct6 := "011110"; funct3 := "010"; opname := "VMNOR      "; vs1 := "00110"; vm := "0";
-                when valu_mxnor => funct6 := "011111"; funct3 := "010"; opname := "VMXNOR     "; vs1 := "00111"; vm := "0";
+                when valu_cpop  => funct6 := "010000"; funct3 := "010"; vs1 := "10000"; vm := vm;
+                when valu_first => funct6 := "010000"; funct3 := "010"; vs1 := "10001"; vm := vm;
+                when valu_msbf  => funct6 := "010100"; funct3 := "010"; vs1 := "00001"; vm := vm;
+                when valu_msof  => funct6 := "010100"; funct3 := "010"; vs1 := "00010"; vm := vm;
+                when valu_msif  => funct6 := "010100"; funct3 := "010"; vs1 := "00011"; vm := vm;
+                when valu_iota  => funct6 := "010100"; funct3 := "010"; vs1 := "10000"; vm := vm;
+                when valu_id    => funct6 := "010100"; funct3 := "010"; vs1 := "10001"; vm := vm;
+                when valu_mandn => funct6 := "011000"; funct3 := "010"; vs1 := vs1    ; vm := "0";
+                when valu_mand  => funct6 := "011001"; funct3 := "010"; vs1 := vs1    ; vm := "0";
+                when valu_mor   => funct6 := "011010"; funct3 := "010"; vs1 := vs1    ; vm := "0";
+                when valu_mxor  => funct6 := "011011"; funct3 := "010"; vs1 := vs1    ; vm := "0";
+                when valu_morn  => funct6 := "011100"; funct3 := "010"; vs1 := vs1    ; vm := "0";
+                when valu_mnand => funct6 := "011101"; funct3 := "010"; vs1 := vs1    ; vm := "0";
+                when valu_mnor  => funct6 := "011110"; funct3 := "010"; vs1 := "00110"; vm := "0";
+                when valu_mxnor => funct6 := "011111"; funct3 := "010"; vs1 := "00111"; vm := "0";
                 when others     => report "Selected V-MASK Operation " & to_string(testop) & " is not supported" severity error;
             end case;
 
             -- Construct the instruction word --
             instruction <= funct6 & vm & vs2 & vs1 & funct3 & vd & vop_arith_cfg;
 
-            report "TESTING V-ALU OPERATION: " & opname;
             run_mask(LMUL_i, VSEW_i, vm, avl, testop, to_integer(unsigned(vs2)), to_integer(unsigned(vs1)), to_integer(unsigned(vd)), funct6, funct3, scalar, vregfile, viq_full, viq_empty, instr_valid);
             
             wait for 80 ns;
@@ -428,6 +470,8 @@ begin
         end loop;
 
         report "SUMMARY => PASSES=" & integer'image(PASS_COUNT) & " FAILS=" & integer'image(FAIL_COUNT) severity note;
+
+        file_close(result_logger);
 
         finish;
     end process;

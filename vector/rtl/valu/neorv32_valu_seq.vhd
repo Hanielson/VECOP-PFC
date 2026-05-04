@@ -189,8 +189,11 @@ begin
     --------------------------------------------------------------------
     process(clk, rst)
         -- Check Related Variables --
-        variable is_invalid : std_ulogic;
-        
+        variable invalid_op      : std_ulogic;
+        variable invalid_eew     : std_ulogic;
+        variable exception_valid : std_ulogic;
+        variable exception_id    : std_ulogic_vector(7 downto 0);
+
         -- Maximum Cycle Variable --
         variable max_cycle   : std_ulogic_vector(2 downto 0);
     begin
@@ -213,7 +216,9 @@ begin
                     elem_count <= (others => '0');
                     -- If received a start indication, go to DECODE --
                     if (start = '1') then
-                        state <= DECODE;
+                        exception_valid := '0';
+                        exception_id    := (others => '0');
+                        state           <= DECODE;
                     end if;
 
                 -- DECODE Instruction Control State --
@@ -238,21 +243,32 @@ begin
                         -- Mask-Logical Operations --
                         when valu_mandn | valu_mand  | valu_mor  | valu_mxor | valu_morn  | valu_mnand | valu_mnor | valu_mxnor =>
                             if (vm = '1') then
-                                is_invalid := '1';
+                                invalid_op := '1';
                             else
-                                is_invalid := '0';
+                                invalid_op := '0';
                             end if;
 
                         -- INVALID V-ALU Operation --
-                        when valu_invalid => is_invalid := '1';
+                        when valu_invalid => invalid_op := '1';
 
                         -- Other V-ALU Operations --
-                        when others => is_invalid := '0';
+                        when others => invalid_op := '0';
+                    end case;
+
+                    case eew is
+                        when "000" | "001" | "010" => invalid_eew := '0';
+                        when others                => invalid_eew := '1';
                     end case;
                     
                     -- OPCODE decode and next state definition --
-                    if (is_invalid = '1') then
-                        state <= INVALID;
+                    if (invalid_op = '1') then
+                        exception_valid := '1';
+                        exception_id    := (0 => '1', others => '0');
+                        state           <= INVALID;
+                    elsif (invalid_eew = '1') then
+                        exception_valid := '1';
+                        exception_id    := (1 => '1', others => '0');
+                        state           <= INVALID;
                     else
                         state <= WAIT_READ;
                     end if;
@@ -360,7 +376,7 @@ begin
                 -- INVALID Control State --
                 when INVALID =>
                     -- TODO: set vill --
-                    state <= IDLE;
+                    state <= SEQ_DONE;
 
                 when others => null;
             end case;
