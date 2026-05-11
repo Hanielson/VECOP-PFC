@@ -325,7 +325,7 @@ begin
         RST <= '0';
         wait for (2 * CLK_PERIOD);
 
-        run_test(vwiden_kernel, VINST, SCAL2, SCAL1, VQ_FULL, VQ_EMPTY, VINST_VALID);
+        run_test(vmem_strided_kernel, VINST, SCAL2, SCAL1, VQ_FULL, VQ_EMPTY, VINST_VALID);
 
         -- Wait until FIFO is empty --
         while (VQ_EMPTY = '0') loop
